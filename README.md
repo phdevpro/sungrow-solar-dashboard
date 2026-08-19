@@ -1,58 +1,86 @@
-# iSolarCloud Dashboard
+# Sungrow Solar Dashboard
 
-Small FastAPI web app that reads data from your Sungrow solar plant via the
-[iSolarCloud OpenAPI](https://developer-api.isolarcloud.eu) and shows it on a
-local dashboard: current power, daily / monthly / total energy, and the device
-list per plant. Auto-refreshes every 60 s.
+Self-hosted dashboard for Sungrow solar plants, built on the official
+[iSolarCloud OpenAPI](https://developer-api.isolarcloud.eu). Not affiliated
+with or endorsed by Sungrow.
+
+Features:
+
+- Plant KPIs: current power, daily/total energy, income, CO₂ savings
+- 5-minute production curve with hover tooltip
+- Per-panel output via SP optimizers (MLPE), with a "not communicating"
+  flag for optimizers that never reported
+- Battery storage: system state of charge plus per-battery SOC, SOH,
+  temperature, voltage and current
+- Device list with online status
+- **Local history**: a background collector polls the API every 5 minutes
+  and stores samples in SQLite, so historical queries are served from your
+  own database instead of the rate-limited cloud API
 
 ## Prerequisites
 
 1. An iSolarCloud account (the one you use in the app / website).
-2. Developer credentials from https://developer-api.isolarcloud.eu:
-   - Register / log in on the developer portal.
-   - Create an application → you get an **Appkey** and a **Secret Key**
-     (used as the `x-access-key` header).
-   - Wait for the application to be approved if required.
+2. Developer credentials from the [Sungrow Developer Portal](https://developer-api.isolarcloud.eu):
+   - Log in with your iSolarCloud account and create an application
+     (choose **No** for OAuth 2.0 — this project uses user-level login).
+   - After the review passes you get an **Appkey** and a **Secret Key**.
+   - Note: keys may take a few minutes after approval before the gateway
+     accepts them (`er_invalid_appkey` until then).
 
-## Setup
+## Configuration
 
 ```bash
-cd ~/repos/isolarcloud
+cp .env.example .env
+# edit .env: gateway region, appkey, access key, account credentials
+```
+
+## Run with Docker (recommended)
+
+```bash
+docker compose up -d
+```
+
+Open http://localhost:8000. Collected history lands in `./data/solar.db`.
+
+To expose it on the internet without opening ports, put a
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+in front and protect it with Cloudflare Access.
+
+## Run locally (development)
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-# edit .env: appkey, access key, username, password, gateway
-```
-
-## Run
-
-```bash
 uvicorn app.main:app --reload
 ```
-
-Open http://127.0.0.1:8000
 
 ## API routes
 
 | Route | Description |
 |---|---|
-| `GET /api/plants` | Plant list (`getPowerStationList`) |
-| `GET /api/plants/{ps_id}/kpi` | Real-time KPIs (`getStationRealKpi`) |
-| `GET /api/plants/{ps_id}/detail` | Plant detail (`getPowerStationDetail`) |
-| `GET /api/plants/{ps_id}/devices` | Devices (`getDeviceList`) |
+| `GET /api/plants` | Plant list with KPIs |
+| `GET /api/plants/{ps_id}/curve?date=YYYYMMDD` | 5-min production curve (DB-first, API backfill) |
+| `GET /api/plants/{ps_id}/panels` | Per-panel optimizer realtime output |
+| `GET /api/plants/{ps_id}/batteries` | Battery SOC/SOH snapshot |
+| `GET /api/plants/{ps_id}/batteries/history?sn=...&date=...` | Battery day series from local DB |
+| `GET /api/plants/{ps_id}/panels/history?ps_key=...&date=...` | Panel day series from local DB |
+| `GET /api/plants/{ps_id}/devices` | Device list |
 
-## Notes
+## Notes & limitations
 
-- The client logs in lazily and caches the token for ~23 h; on token-expiry
-  error codes it re-logs in on the next request.
-- Field names in responses occasionally differ between accounts/API versions;
-  the dashboard tries the common variants (`curr_power`/`power`,
-  `today_energy`/`actual_energy`). If a KPI shows `—`, check the raw JSON at
-  `/api/plants/{ps_id}/kpi` and adjust `kpiHTML()` in
-  `app/static/index.html`.
-- If your developer application was created with **encryption enabled**
-  (RSA/AES), the plain JSON calls in `app/isolarcloud.py` will fail with an
-  auth error — either create the app without encryption or add the
-  encryption layer per the portal docs.
-- Never commit `.env` (see `.gitignore`).
+- The gateway rate-limits aggressively on the free plan (HTTP 429). The
+  client keeps concurrency at 2 and retries with backoff; responses are
+  cached server-side (curve ~4.5 min, panels/batteries ~55 s).
+- Minute-data queries are limited to ~2-hour windows; the day curve is
+  chunked accordingly.
+- Measuring points used: inverter/ESS production power `p13003` (type 14)
+  or `p24` (type 1); optimizer `58107` output W / `58101` lifetime Wh;
+  battery `58604` SOC / `58605` SOH / `58603` temperature / `58601` V /
+  `58602` A; ESS system SOC `p13141` / SOH `p13142`.
+- Tested with an SH-series hybrid inverter, SBS batteries and SP optimizers.
+  Other setups may expose different measuring points — adjust as needed.
+
+## License
+
+MIT

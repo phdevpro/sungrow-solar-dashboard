@@ -1,3 +1,4 @@
+import asyncio
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -6,11 +7,10 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
+from . import collector, storage
+from .collector import POWER_POINT
 from .config import settings
 from .isolarcloud import ISolarCloudError, client
-
-# Inverter/ESS production-power point per device type.
-POWER_POINT = {14: "p13003", 1: "p24"}
 
 _device_cache: dict[str, tuple[float, list[dict]]] = {}
 _response_cache: dict[str, tuple[float, dict]] = {}
@@ -47,11 +47,15 @@ async def lifespan(app: FastAPI):
             f"Missing configuration: {', '.join(missing)}. "
             "Copy .env.example to .env and fill in your credentials."
         )
+    storage.connect()
+    task = asyncio.create_task(collector.run_forever())
     yield
+    task.cancel()
     await client.close()
+    storage.close()
 
 
-app = FastAPI(title="iSolarCloud Dashboard", lifespan=lifespan)
+app = FastAPI(title="Sungrow Solar Dashboard", lifespan=lifespan)
 
 INDEX_HTML = (Path(__file__).parent / "static" / "index.html").read_text()
 
@@ -103,8 +107,20 @@ async def plant_devices(ps_id: str):
 
 @app.get("/api/plants/{ps_id}/curve")
 async def plant_curve(ps_id: str, date: str | None = None):
-    """5-minute production power curve (W) for the plant's inverter."""
+    """5-minute production power curve (W) for the plant's inverter.
+
+    Served from the local DB when it has good coverage for the day;
+    otherwise backfilled from the API (and stored, so next time is local).
+    """
     date = date or datetime.now().strftime("%Y%m%d")
+    today = datetime.now().strftime("%Y%m%d")
+
+    # Expected 5-min samples for the requested day so far.
+    minutes = (datetime.now().hour * 60 + datetime.now().minute) if date == today else 1440
+    expected = minutes / 5
+    if storage.power_day_count(ps_id, date) >= expected * 0.8:
+        return {"date": date, "samples": storage.load_power_day(ps_id, date), "source": "db"}
+
     cached = cache_get(f"curve:{ps_id}:{date}", 270)
     if cached is not None:
         return cached
@@ -119,13 +135,16 @@ async def plant_curve(ps_id: str, date: str | None = None):
         samples = await client.get_day_curve(inverter["ps_key"], point, date)
     except ISolarCloudError as exc:
         raise _api_error(exc)
+    clean = [
+        (s["time_stamp"], float(s[point]))
+        for s in samples
+        if s.get(point) not in (None, "", "--")
+    ]
+    storage.store_power(ps_id, clean)
     return cache_put(f"curve:{ps_id}:{date}", {
         "date": date,
-        "samples": [
-            {"t": s["time_stamp"][8:12], "w": float(s[point])}
-            for s in samples
-            if s.get(point) not in (None, "", "--")
-        ],
+        "samples": [{"t": ts[8:12], "w": w} for ts, w in clean],
+        "source": "api",
     })
 
 
@@ -227,3 +246,17 @@ async def plant_batteries(ps_id: str):
     except ISolarCloudError as exc:
         raise _api_error(exc)
     return cache_put(f"batteries:{ps_id}", result)
+
+
+@app.get("/api/plants/{ps_id}/batteries/history")
+async def battery_history(ps_id: str, sn: str, date: str | None = None):
+    """Battery SOC/SOH/temperature day series from the local DB."""
+    date = date or datetime.now().strftime("%Y%m%d")
+    return {"sn": sn, "date": date, "samples": storage.load_battery_day(sn, date)}
+
+
+@app.get("/api/plants/{ps_id}/panels/history")
+async def panel_history(ps_id: str, ps_key: str, date: str | None = None):
+    """Per-panel power day series from the local DB."""
+    date = date or datetime.now().strftime("%Y%m%d")
+    return {"ps_key": ps_key, "date": date, "samples": storage.load_panel_day(ps_key, date)}
