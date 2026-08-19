@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -246,6 +247,53 @@ async def plant_batteries(ps_id: str):
     except ISolarCloudError as exc:
         raise _api_error(exc)
     return cache_put(f"batteries:{ps_id}", result)
+
+
+@app.get("/api/plants/{ps_id}/weather")
+async def plant_weather(ps_id: str, date: str | None = None):
+    """Hourly weather codes + current conditions for the plant's location,
+    from Open-Meteo (no API key; only plant coordinates are sent)."""
+    date = date or datetime.now().strftime("%Y%m%d")
+    cached = cache_get(f"weather:{ps_id}:{date}", 900)
+    if cached is not None:
+        return cached
+    try:
+        plants = (await client.get_power_station_list()).get("pageList", [])
+    except ISolarCloudError as exc:
+        raise _api_error(exc)
+    plant = next((p for p in plants if str(p.get("ps_id")) == ps_id), None)
+    if plant is None or plant.get("latitude") is None:
+        raise HTTPException(status_code=404, detail="Plant coordinates not available")
+
+    iso = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    async with httpx.AsyncClient(timeout=15) as http:
+        r = await http.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": round(float(plant["latitude"]), 3),
+                "longitude": round(float(plant["longitude"]), 3),
+                "hourly": "weather_code",
+                "current": "weather_code,temperature_2m",
+                "timezone": "auto",
+                "start_date": iso,
+                "end_date": iso,
+            },
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail="Weather service unavailable")
+    w = r.json()
+    hourly = [
+        {"h": int(t[11:13]), "code": c}
+        for t, c in zip(w["hourly"]["time"], w["hourly"]["weather_code"])
+    ]
+    return cache_put(f"weather:{ps_id}:{date}", {
+        "date": date,
+        "current": {
+            "code": w.get("current", {}).get("weather_code"),
+            "temp_c": w.get("current", {}).get("temperature_2m"),
+        },
+        "hourly": hourly,
+    })
 
 
 @app.get("/api/plants/{ps_id}/batteries/history")
