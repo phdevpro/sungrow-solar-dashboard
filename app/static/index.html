@@ -376,9 +376,10 @@ function renderCurve(container, maxLabel, data, weather) {
 const fmtW2 = w => w == null ? "—" : (Math.abs(w) >= 1000 ? (w / 1000).toFixed(2) + " kW" : Math.round(w) + " W");
 const fmtKWh = wh => wh == null ? "—" : (wh / 1000).toFixed(1) + " kWh";
 
-function renderFlow(container, sub, f) {
+function renderFlow(container, sub, f, ev) {
   const soc = f.soc == null ? "—" : (f.soc * 100).toFixed(0) + "%";
   sub.textContent = `battery ${soc}`;
+  const evOn = ev && ev.charging && (ev.power_w ?? 0) > 15;
 
   const pv = Math.max(f.pv_w ?? 0, 0), load = Math.max(f.load_w ?? 0, 0);
   const chg = Math.max(f.batt_charge_w ?? 0, 0), dis = Math.max(f.batt_discharge_w ?? 0, 0);
@@ -397,12 +398,15 @@ function renderFlow(container, sub, f) {
   const gridToBatt = Math.max(chg - pvToBatt, 0);
   const battToGrid = Math.max(exp - pvToGrid, 0);
 
-  // Diamond layout: solar top, grid left, home right, battery bottom.
+  // Diamond layout: solar top, grid left, home right, battery bottom;
+  // EV hangs below Home when the wall connector reports charging.
   // All paths are quarter-curves that meet smoothly around the center.
   const S = { x: 350, y: 62 }, G = { x: 96, y: 185 }, H = { x: 604, y: 185 }, B = { x: 350, y: 308 };
-  const CLR = { sun: "#eda100", batt: "#2a9d5c", grid: "#9085e9", home: "#3987e5" };
+  const EV = { x: 604, y: 330 };
+  const CLR = { sun: "#eda100", batt: "#2a9d5c", grid: "#9085e9", home: "#3987e5", ev: "#e34948" };
 
   const flows = [
+    ...(ev ? [{ w: evOn ? ev.power_w : 0, path: `M ${H.x} ${H.y + 44} L ${EV.x} ${EV.y - 44}`, color: CLR.ev }] : []),
     { w: pvToLoad,   path: `M ${S.x} ${S.y + 38} C ${S.x} 185, ${S.x} 185, ${H.x - 44} 185`, color: CLR.sun },
     { w: pvToBatt,   path: `M ${S.x} ${S.y + 38} L ${B.x} ${B.y - 44}`,                       color: CLR.sun },
     { w: pvToGrid,   path: `M ${S.x} ${S.y + 38} C ${S.x} 185, ${S.x} 185, ${G.x + 44} 185`, color: CLR.sun },
@@ -438,14 +442,17 @@ function renderFlow(container, sub, f) {
          ${l2 ? `<text x="${n.x}" y="${n.y + 73}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${l2}</text>` : ""}`}`;
 
   const t = f.today || {};
+  const evState = !ev ? "" : evOn ? "Charging" : ev.vehicle_connected ? "Plugged in" : "Disconnected";
+  const H_SVG = ev ? 420 : 400;
   container.innerHTML = `
     <div class="chart-wrap">
-      <svg viewBox="0 0 700 400" role="img" aria-label="Energy flow">
+      <svg viewBox="0 0 700 ${H_SVG}" role="img" aria-label="Energy flow">
         ${paths}
         ${node(S, "☀️", CLR.sun, fmtW2(pv), "Solar", "", true)}
         ${node(G, "⚡", CLR.grid, fmtW2(Math.abs(imp - exp)), "Grid", gridState)}
-        ${node(H, "🏠", CLR.home, fmtW2(load), "Home", "")}
+        ${node(H, "🏠", CLR.home, fmtW2(load), "Home", "", !!ev)}
         ${node(B, "🔋", CLR.batt, fmtW2(Math.abs(chg - dis)), `Battery ${soc}`, battState)}
+        ${ev ? node(EV, "🚗", CLR.ev, evOn ? fmtW2(ev.power_w) : "0 W", "EV", evState) : ""}
       </svg>
     </div>
     <div class="flow-today">
@@ -455,6 +462,7 @@ function renderFlow(container, sub, f) {
       <span>exported <b>${fmtKWh(t.export_wh)}</b></span>
       <span>charged <b>${fmtKWh(t.batt_charge_wh)}</b></span>
       <span>discharged <b>${fmtKWh(t.batt_discharge_wh)}</b></span>
+      ${ev?.session_wh != null ? `<span>EV session <b>${fmtKWh(ev.session_wh)}</b></span>` : ""}
     </div>`;
 }
 
@@ -598,6 +606,7 @@ async function refresh() {
       app.appendChild(el);
       const curveSlot = el.querySelector(".curve-slot");
       const isFirst = first;
+      const evP = getJSON("/api/ev").catch(() => null);
       const weatherP = getJSON(`/api/plants/${p.ps_id}/weather`).catch(() => null);
       Promise.all([getJSON(`/api/plants/${p.ps_id}/curve`), weatherP])
         .then(([curve, weather]) => {
@@ -610,8 +619,10 @@ async function refresh() {
           }
         })
         .catch(e => { curveSlot.innerHTML = `<div class="error">${e.message}</div>`; });
-      loadSection(`/api/plants/${p.ps_id}/flow`, renderFlow,
-        el.querySelector(".flow-slot"), el.querySelector(".flow-sub"));
+      const flowSlot = el.querySelector(".flow-slot");
+      Promise.all([getJSON(`/api/plants/${p.ps_id}/flow`), evP])
+        .then(([flow, ev]) => renderFlow(flowSlot, el.querySelector(".flow-sub"), flow, ev))
+        .catch(e => { flowSlot.innerHTML = `<div class="error">${e.message}</div>`; });
       loadSection(`/api/plants/${p.ps_id}/panels`, renderPanels,
         el.querySelector(".panels-slot"), el.querySelector(".panels-sub"));
       loadSection(`/api/plants/${p.ps_id}/batteries`, renderBatteries,

@@ -6,7 +6,7 @@ import logging
 import time
 from datetime import datetime
 
-from . import storage
+from . import storage, wallconnector
 from .isolarcloud import ISolarCloudError, client
 
 log = logging.getLogger("collector")
@@ -165,6 +165,15 @@ async def collect_once() -> None:
     plants = (await client.get_power_station_list()).get("pageList", [])
     for plant in plants:
         await _collect_plant(plant)
+
+    # Wall Connector on the same LAN (remote deployments use the push
+    # agent + /api/ev/ingest instead).
+    if wallconnector.enabled():
+        try:
+            s = await wallconnector.fetch_status()
+            storage.store_ev(time.strftime("%Y%m%d%H%M%S"), s)
+        except Exception as exc:
+            log.warning("wall connector poll failed: %s", exc)
 
 
 async def run_forever() -> None:

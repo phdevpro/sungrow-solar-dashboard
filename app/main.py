@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import auth, collector, storage
+from . import auth, collector, storage, wallconnector
 from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
@@ -62,8 +62,9 @@ STATIC = Path(__file__).parent / "static"
 INDEX_HTML = (STATIC / "index.html").read_text()
 LOGIN_HTML = (STATIC / "login.html").read_text()
 
-# Reachable without a session: login page and the PWA shell.
-PUBLIC_PATHS = {"/login", "/manifest.webmanifest", "/sw.js"}
+# Reachable without a session: login page, the PWA shell, and the EV
+# ingest endpoint (which authenticates with its own bearer token).
+PUBLIC_PATHS = {"/login", "/manifest.webmanifest", "/sw.js", "/api/ev/ingest"}
 
 
 @app.middleware("http")
@@ -369,6 +370,58 @@ async def flow_history(ps_id: str, date: str | None = None):
     """Day series of flow samples from the local DB (collector, 5-min)."""
     date = date or datetime.now().strftime("%Y%m%d")
     return {"date": date, "samples": storage.load_flow_day(ps_id, date)}
+
+
+# ---- EV (Tesla Wall Connector) --------------------------------------------
+
+_ev_last: dict = {}
+
+
+@app.post("/api/ev/ingest")
+async def ev_ingest(request: Request):
+    """Push endpoint for the home twc-agent. Bearer-token authenticated."""
+    if not settings.ev_ingest_token:
+        raise HTTPException(status_code=404, detail="EV ingest not configured")
+    header = request.headers.get("authorization", "")
+    token = header.removeprefix("Bearer ").strip()
+    import hmac as _hmac
+    if not _hmac.compare_digest(token, settings.ev_ingest_token):
+        raise HTTPException(status_code=401, detail="Bad token")
+    payload = await request.json()
+    sample = {
+        "vehicle_connected": bool(payload.get("vehicle_connected")),
+        "charging": bool(payload.get("charging")),
+        "power_w": payload.get("power_w"),
+        "voltage": payload.get("voltage"),
+        "current_a": payload.get("current_a"),
+        "session_wh": payload.get("session_wh"),
+        "lifetime_wh": payload.get("lifetime_wh"),
+    }
+    ts = time.strftime("%Y%m%d%H%M%S")
+    storage.store_ev(ts, sample)
+    _ev_last.clear()
+    _ev_last.update(sample, received=time.time())
+    return {"ok": True}
+
+
+@app.get("/api/ev")
+async def ev_status():
+    """Latest Wall Connector state: pushed by the agent, or polled locally."""
+    if _ev_last and time.time() - _ev_last.get("received", 0) < 600:
+        return {**{k: v for k, v in _ev_last.items() if k != "received"},
+                "age_s": int(time.time() - _ev_last["received"])}
+    if wallconnector.enabled():
+        try:
+            return {**(await wallconnector.fetch_status()), "age_s": 0}
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Wall Connector: {exc}")
+    raise HTTPException(status_code=404, detail="No EV data")
+
+
+@app.get("/api/ev/history")
+async def ev_history(date: str | None = None):
+    date = date or datetime.now().strftime("%Y%m%d")
+    return {"date": date, "samples": storage.load_ev_day(date)}
 
 
 @app.get("/api/plants/{ps_id}/weather")

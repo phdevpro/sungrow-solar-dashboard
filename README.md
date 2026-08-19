@@ -22,6 +22,12 @@ Features:
   cookies — recommended when the dashboard is reachable from the internet
 - Installable PWA (manifest + service worker): add it to your phone's home
   screen
+- Optional Tesla Wall Connector Gen 3 integration: an EV node in the
+  energy-flow diagram plus charge-session history, fed either by polling
+  the unit on the same LAN (`TWC_HOST`) or by the bundled
+  [`twc-agent`](twc-agent/) container running on your home server pushing
+  to `/api/ev/ingest` (`EV_INGEST_TOKEN` shared secret) when the dashboard
+  is hosted elsewhere
 
 ## Prerequisites
 

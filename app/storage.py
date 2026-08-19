@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS flow_samples (
     soc     REAL,
     PRIMARY KEY (ps_id, ts)
 );
+CREATE TABLE IF NOT EXISTS ev_samples (
+    ts         TEXT PRIMARY KEY,   -- yyyyMMddHHmmss
+    power_w    REAL,
+    session_wh REAL,
+    connected  INTEGER,
+    charging   INTEGER
+);
 CREATE TABLE IF NOT EXISTS plant_kpi (
     ps_id        TEXT NOT NULL,
     ts           TEXT NOT NULL,
@@ -145,6 +152,29 @@ def load_flow_day(ps_id: str, date: str) -> list[dict[str, Any]]:
         return [
             {"t": ts[8:12], "pv_w": pv, "load_w": lo, "grid_w": gr, "batt_w": ba, "soc": soc}
             for ts, pv, lo, gr, ba, soc in cur.fetchall()
+        ]
+
+
+def store_ev(ts: str, s: dict[str, Any]) -> None:
+    _execmany(
+        "INSERT OR REPLACE INTO ev_samples (ts, power_w, session_wh, connected, charging) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [(ts, s.get("power_w"), s.get("session_wh"),
+          int(bool(s.get("vehicle_connected"))), int(bool(s.get("charging"))))],
+    )
+
+
+def load_ev_day(date: str) -> list[dict[str, Any]]:
+    with _lock:
+        cur = connect().execute(
+            "SELECT ts, power_w, session_wh, connected, charging FROM ev_samples "
+            "WHERE ts LIKE ? ORDER BY ts",
+            (f"{date}%",),
+        )
+        return [
+            {"t": ts[8:12], "power_w": p, "session_wh": sw,
+             "connected": bool(c), "charging": bool(ch)}
+            for ts, p, sw, c, ch in cur.fetchall()
         ]
 
 

@@ -17,6 +17,9 @@ services:
       ISC_DB_PATH: /data/solar.db
       DASH_USER: ${DASH_USER}
       DASH_PASSWORD: ${DASH_PASSWORD}
+      # Shared secret for the home twc-agent (Tesla Wall Connector push);
+      # leave empty if you don't use the agent.
+      EV_INGEST_TOKEN: ${EV_INGEST_TOKEN}
     volumes:
       - solar_data:/data
     networks:

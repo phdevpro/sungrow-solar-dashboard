@@ -1,0 +1,16 @@
+# Portainer stack for the HOME server: polls the Tesla Wall Connector
+# Gen 3 on the LAN and pushes samples to the cloud dashboard.
+# Environment variables to set in Portainer:
+#   TWC_HOST      Wall Connector LAN IP (find it in your router / Tesla One)
+#   DASH_URL      e.g. https://solar.example.com
+#   INGEST_TOKEN  same value as EV_INGEST_TOKEN on the dashboard stack
+
+services:
+  twc-agent:
+    image: ghcr.io/phdevpro/sungrow-solar-dashboard-twc-agent:latest
+    environment:
+      TWC_HOST: ${TWC_HOST}
+      DASH_URL: ${DASH_URL}
+      INGEST_TOKEN: ${INGEST_TOKEN}
+      INTERVAL: "60"
+    restart: unless-stopped
