@@ -2,12 +2,19 @@
 # Pulls the prebuilt multi-arch image (amd64 / arm64) from GHCR — no build
 # on the host. Fill in the environment variables below (or define them as
 # stack environment variables in Portainer and reference them as ${VAR}).
+#
+# Traefik: labels below assume a Traefik v2/v3 instance watching Docker,
+# an external network named "traefik", a "websecure" entrypoint and a
+# certificate resolver named "letsencrypt" — adjust those three names to
+# match your setup. Set DASH_DOMAIN (e.g. solar.example.com) as a stack
+# environment variable. With Traefik in front you can drop the "ports:"
+# mapping entirely.
 
 services:
   dashboard:
     image: ghcr.io/phdevpro/sungrow-solar-dashboard:latest
     ports:
-      - "8000:8000"
+      - "8000:8000"   # remove if only reachable through Traefik
     environment:
       ISC_GATEWAY: https://gateway.isolarcloud.eu
       ISC_APPKEY: ${ISC_APPKEY}
@@ -20,7 +27,26 @@ services:
       DASH_PASSWORD: ${DASH_PASSWORD}
     volumes:
       - solar_data:/data
+    networks:
+      - traefik
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik
+      - traefik.http.routers.solar.rule=Host(`${DASH_DOMAIN}`)
+      - traefik.http.routers.solar.entrypoints=websecure
+      - traefik.http.routers.solar.tls=true
+      - traefik.http.routers.solar.tls.certresolver=letsencrypt
+      - traefik.http.services.solar.loadbalancer.server.port=8000
+      # Optional: redirect plain HTTP to HTTPS (needs a "web" entrypoint)
+      # - traefik.http.routers.solar-http.rule=Host(`${DASH_DOMAIN}`)
+      # - traefik.http.routers.solar-http.entrypoints=web
+      # - traefik.http.routers.solar-http.middlewares=solar-https
+      # - traefik.http.middlewares.solar-https.redirectscheme.scheme=https
     restart: unless-stopped
+
+networks:
+  traefik:
+    external: true
 
 volumes:
   solar_data:
