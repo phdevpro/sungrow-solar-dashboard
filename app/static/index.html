@@ -379,61 +379,73 @@ const fmtKWh = wh => wh == null ? "—" : (wh / 1000).toFixed(1) + " kWh";
 function renderFlow(container, sub, f) {
   const soc = f.soc == null ? "—" : (f.soc * 100).toFixed(0) + "%";
   sub.textContent = `battery ${soc}`;
-  const active = (w) => Math.abs(w ?? 0) > 15;
 
-  // Node positions in a 700x250 viewBox.
-  const N = {
-    sun:  { x: 350, y: 45 },
-    batt: { x: 105, y: 125 },
-    home: { x: 595, y: 125 },
-    grid: { x: 350, y: 205 },
-  };
-  const C = { x: 350, y: 125 };
+  const pv = Math.max(f.pv_w ?? 0, 0), load = Math.max(f.load_w ?? 0, 0);
+  const chg = Math.max(f.batt_charge_w ?? 0, 0), dis = Math.max(f.batt_discharge_w ?? 0, 0);
+  const imp = Math.max(f.grid_import_w ?? 0, 0), exp = Math.max(f.grid_export_w ?? 0, 0);
 
-  // Each edge: from → to (direction of actual flow), color, value, on/off.
-  const edges = [
-    { a: N.sun,  b: C, w: f.pv_w,               color: "var(--accent)", out: true },
-    { a: C, b: N.home, w: f.load_w,             color: "var(--ink-2)",  out: true },
-    { a: f.batt_w >= 0 ? C : N.batt, b: f.batt_w >= 0 ? N.batt : C, w: f.batt_w, color: "var(--series)" },
-    { a: f.grid_w >= 0 ? N.grid : C, b: f.grid_w >= 0 ? C : N.grid, w: f.grid_w, color: "#9085e9" },
+  // Pair-flow split (the API only gives node totals): PV feeds the house
+  // first, surplus charges the battery, remainder exports; deficits are
+  // covered by battery, then grid.
+  const pvToLoad = Math.min(pv, load);
+  let pvRem = pv - pvToLoad;
+  const pvToBatt = Math.min(pvRem, chg);
+  pvRem -= pvToBatt;
+  const pvToGrid = Math.min(pvRem, exp);
+  const battToLoad = Math.min(dis, load - pvToLoad);
+  const gridToLoad = Math.max(load - pvToLoad - battToLoad, 0) > 15 ? Math.min(imp, load - pvToLoad - battToLoad) : 0;
+  const gridToBatt = Math.max(chg - pvToBatt, 0);
+  const battToGrid = Math.max(exp - pvToGrid, 0);
+
+  // Diamond layout: solar top, grid left, home right, battery bottom.
+  // All paths are quarter-curves that meet smoothly around the center.
+  const S = { x: 350, y: 62 }, G = { x: 96, y: 185 }, H = { x: 604, y: 185 }, B = { x: 350, y: 308 };
+  const CLR = { sun: "#eda100", batt: "#2a9d5c", grid: "#9085e9", home: "#3987e5" };
+
+  const flows = [
+    { w: pvToLoad,   path: `M ${S.x} ${S.y + 38} C ${S.x} 185, ${S.x} 185, ${H.x - 44} 185`, color: CLR.sun },
+    { w: pvToBatt,   path: `M ${S.x} ${S.y + 38} L ${B.x} ${B.y - 44}`,                       color: CLR.sun },
+    { w: pvToGrid,   path: `M ${S.x} ${S.y + 38} C ${S.x} 185, ${S.x} 185, ${G.x + 44} 185`, color: CLR.sun },
+    { w: battToLoad, path: `M ${B.x} ${B.y - 44} C ${B.x} 185, ${B.x} 185, ${H.x - 44} 185`, color: CLR.batt },
+    { w: battToGrid, path: `M ${B.x} ${B.y - 44} C ${B.x} 185, ${B.x} 185, ${G.x + 44} 185`, color: CLR.batt },
+    { w: gridToLoad, path: `M ${G.x + 44} 185 L ${H.x - 44} 185`,                             color: CLR.grid },
+    { w: gridToBatt, path: `M ${G.x + 44} 185 C ${B.x} 185, ${B.x} 185, ${B.x} ${B.y - 44}`, color: CLR.grid },
   ];
 
-  // Trim each line to stop at the node circles so it never crosses labels.
-  const lines = edges.map((e, i) => {
-    const on = active(e.w);
-    const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const trim = 32;
-    const a = { x: e.a.x + dx / len * trim, y: e.a.y + dy / len * trim };
-    const b = { x: e.b.x - dx / len * trim, y: e.b.y - dy / len * trim };
-    return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}"
-      stroke="${e.color}" stroke-width="${on ? 2.5 : 1}" opacity="${on ? 1 : 0.25}"
-      ${on ? `marker-end="url(#ah${i})"` : ""}/>
-      ${on ? `<defs><marker id="ah${i}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="${e.color}"/></marker></defs>` : ""}`;
+  const paths = flows.map((e, i) => {
+    const on = e.w > 15;
+    // Dot speed scales with power: 0.5 kW ≈ 4s per lap, 5 kW ≈ 1.2s.
+    const dur = Math.max(1.2, Math.min(5, 2200 / Math.max(e.w, 80))).toFixed(2);
+    const base = `<path d="${e.path}" fill="none" stroke="${on ? e.color : "var(--hairline)"}"
+      stroke-width="${on ? 2 : 1.5}" opacity="${on ? 0.55 : 0.6}" stroke-linecap="round"/>`;
+    if (!on) return base;
+    const dots = [0, 1, 2].map(k => `<circle r="4.5" fill="${e.color}">
+      <animateMotion dur="${dur}s" begin="${(-dur * k / 3).toFixed(2)}s" repeatCount="indefinite" path="${e.path}"/>
+    </circle>`).join("");
+    return base + dots;
   }).join("");
 
-  // side="right": name sits beside the circle (vertical-edge nodes), so it
-  // never overlaps the flow line; value always above the circle.
-  const node = (n, ico, label, value, side) => `
-    <circle cx="${n.x}" cy="${n.y}" r="26" fill="var(--surface)" stroke="var(--border)"/>
-    <text x="${n.x}" y="${n.y + 6}" text-anchor="middle" font-size="19">${ico}</text>
-    ${side === "right"
-      ? `<text x="${n.x + 36}" y="${n.y + 4}" text-anchor="start" font-size="11" fill="var(--muted)">${label}</text>`
-      : `<text x="${n.x}" y="${n.y + 44}" text-anchor="middle" font-size="11" fill="var(--muted)">${label}</text>`}
-    ${value ? `<text x="${n.x}" y="${n.y - 34}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--ink)">${value}</text>` : ""}`;
+  const battState = chg - dis > 15 ? "Charging" : dis - chg > 15 ? "Discharging" : "Standby";
+  const gridState = imp - exp > 15 ? "Importing" : exp - imp > 15 ? "Exporting" : "Standby";
 
-  const battState = f.batt_w > 15 ? "charging" : f.batt_w < -15 ? "discharging" : "idle";
-  const gridState = f.grid_w > 15 ? "importing" : f.grid_w < -15 ? "exporting" : "idle";
+  const node = (n, ico, color, value, l1, l2, labelAbove) => `
+    <circle cx="${n.x}" cy="${n.y}" r="38" fill="var(--surface)" stroke="${color}" stroke-width="2.5"/>
+    <text x="${n.x}" y="${n.y - 4}" text-anchor="middle" font-size="20">${ico}</text>
+    <text x="${n.x}" y="${n.y + 20}" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">${value}</text>
+    ${labelAbove
+      ? `<text x="${n.x}" y="${n.y - 50}" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink-2)">${l1}</text>`
+      : `<text x="${n.x}" y="${n.y + 58}" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink-2)">${l1}</text>
+         ${l2 ? `<text x="${n.x}" y="${n.y + 73}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${l2}</text>` : ""}`}`;
+
   const t = f.today || {};
-
   container.innerHTML = `
     <div class="chart-wrap">
-      <svg viewBox="0 0 700 250" role="img" aria-label="Energy flow">
-        ${lines}
-        ${node(N.sun, "☀️", "Solar", fmtW2(f.pv_w), "right")}
-        ${node(N.batt, "🔋", `Battery ${soc} · ${battState}`, fmtW2(Math.abs(f.batt_w)))}
-        ${node(N.home, "🏠", "Home", fmtW2(f.load_w))}
-        ${node(N.grid, "⚡", `Grid · ${gridState} ${Math.abs(f.grid_w ?? 0) > 15 ? fmtW2(Math.abs(f.grid_w)) : ""}`, "", "right")}
+      <svg viewBox="0 0 700 400" role="img" aria-label="Energy flow">
+        ${paths}
+        ${node(S, "☀️", CLR.sun, fmtW2(pv), "Solar", "", true)}
+        ${node(G, "⚡", CLR.grid, fmtW2(Math.abs(imp - exp)), "Grid", gridState)}
+        ${node(H, "🏠", CLR.home, fmtW2(load), "Home", "")}
+        ${node(B, "🔋", CLR.batt, fmtW2(Math.abs(chg - dis)), `Battery ${soc}`, battState)}
       </svg>
     </div>
     <div class="flow-today">
