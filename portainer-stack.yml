@@ -15,6 +15,9 @@ services:
       ISC_USERNAME: ${ISC_USERNAME}
       ISC_PASSWORD: ${ISC_PASSWORD}
       ISC_DB_PATH: /data/solar.db
+      # Dashboard login (recommended when exposed beyond your LAN)
+      DASH_USER: ${DASH_USER}
+      DASH_PASSWORD: ${DASH_PASSWORD}
     volumes:
       - solar_data:/data
     restart: unless-stopped

@@ -12,6 +12,13 @@ class Settings:
     username: str = os.getenv("ISC_USERNAME", "")
     password: str = os.getenv("ISC_PASSWORD", "")
 
+    # Dashboard login (optional): auth is enabled when both are set.
+    dash_user: str = os.getenv("DASH_USER", "")
+    dash_password: str = os.getenv("DASH_PASSWORD", "")
+    # Session-signing secret; falls back to a hash of credentials so
+    # sessions survive restarts without extra configuration.
+    dash_secret: str = os.getenv("DASH_SECRET", "")
+
     def validate(self) -> list[str]:
         missing = []
         for field in ("appkey", "access_key", "username", "password"):

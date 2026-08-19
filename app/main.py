@@ -5,10 +5,10 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import collector, storage
+from . import auth, collector, storage
 from .collector import POWER_POINT
 from .config import settings
 from .isolarcloud import ISolarCloudError, client
@@ -58,7 +58,81 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Sungrow Solar Dashboard", lifespan=lifespan)
 
-INDEX_HTML = (Path(__file__).parent / "static" / "index.html").read_text()
+STATIC = Path(__file__).parent / "static"
+INDEX_HTML = (STATIC / "index.html").read_text()
+LOGIN_HTML = (STATIC / "login.html").read_text()
+
+# Reachable without a session: login page and the PWA shell.
+PUBLIC_PATHS = {"/login", "/manifest.webmanifest", "/sw.js"}
+
+
+@app.middleware("http")
+async def require_session(request: Request, call_next):
+    if auth.enabled():
+        path = request.url.path
+        if path not in PUBLIC_PATHS and not path.startswith("/icons/"):
+            if not auth.check_token(request.cookies.get(auth.SESSION_COOKIE, "")):
+                if path.startswith("/api/"):
+                    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+                return RedirectResponse("/login", status_code=303)
+    return await call_next(request)
+
+
+def _is_https(request: Request) -> bool:
+    return (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto") == "https"
+    )
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page() -> str:
+    return LOGIN_HTML.replace("<!--ERROR-->", "")
+
+
+@app.post("/login")
+async def login(request: Request, username: str = Form(""), password: str = Form("")):
+    if auth.enabled() and auth.check_credentials(username, password):
+        resp = RedirectResponse("/", status_code=303)
+        resp.set_cookie(
+            auth.SESSION_COOKIE,
+            auth.make_token(),
+            max_age=auth.SESSION_DAYS * 86400,
+            httponly=True,
+            samesite="lax",
+            secure=_is_https(request),
+        )
+        return resp
+    await asyncio.sleep(0.5)  # soften brute-force attempts
+    return HTMLResponse(
+        LOGIN_HTML.replace("<!--ERROR-->", '<div class="err">Wrong username or password.</div>'),
+        status_code=401,
+    )
+
+
+@app.get("/logout")
+async def logout():
+    resp = RedirectResponse("/login", status_code=303)
+    resp.delete_cookie(auth.SESSION_COOKIE)
+    return resp
+
+
+@app.get("/manifest.webmanifest")
+async def manifest():
+    return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(STATIC / "sw.js", media_type="text/javascript")
+
+
+@app.get("/icons/{name}")
+async def icon(name: str):
+    path = STATIC / "icons" / name
+    if not path.is_file() or path.parent != STATIC / "icons":
+        raise HTTPException(status_code=404)
+    return FileResponse(path)
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -16,6 +16,12 @@ Features:
 - **Local history**: a background collector polls the API every 5 minutes
   and stores samples in SQLite, so historical queries are served from your
   own database instead of the rate-limited cloud API
+- Hourly weather strip under the production chart plus current conditions
+  in the header (Open-Meteo, keyless; only plant coordinates are sent)
+- Optional login (set `DASH_USER` / `DASH_PASSWORD`) with signed session
+  cookies — recommended when the dashboard is reachable from the internet
+- Installable PWA (manifest + service worker): add it to your phone's home
+  screen
 
 ## Prerequisites
 

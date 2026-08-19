@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Sungrow Solar Dashboard</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e;
+    --muted: #898781; --border: rgba(11,11,11,0.10); --series: #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7;
+      --border: rgba(255,255,255,0.10); --series: #3987e5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--page); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  form {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 2rem; width: min(340px, calc(100vw - 2rem));
+  }
+  h1 { font-size: 1.1rem; margin: 0 0 1.2rem; }
+  label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 0.25rem; }
+  input {
+    width: 100%; padding: 0.55rem 0.7rem; margin-bottom: 0.9rem;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--page); color: var(--ink); font: inherit;
+  }
+  input:focus { outline: 2px solid var(--series); outline-offset: -1px; border-color: transparent; }
+  button {
+    width: 100%; padding: 0.6rem; border: 0; border-radius: 8px;
+    background: var(--series); color: #fff; font: inherit; font-weight: 600;
+    cursor: pointer;
+  }
+  .err { color: #d03b3b; font-size: 0.82rem; margin: -0.3rem 0 0.8rem; }
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h1>Sungrow Solar Dashboard</h1>
+  <!--ERROR-->
+  <label for="username">Username</label>
+  <input id="username" name="username" autocomplete="username" required autofocus>
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" autocomplete="current-password" required>
+  <button type="submit">Sign in</button>
+</form>
+</body>
+</html>
