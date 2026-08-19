@@ -197,7 +197,12 @@ const pct = v => v == null ? "—" : (v * 100).toFixed(1);
 async function getJSON(url) {
   const r = await fetch(url);
   if (r.status === 401) { location.href = "/login"; throw new Error("Unauthorized"); }
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  if (!r.ok) {
+    const body = await r.text().catch(() => "");
+    let detail = "";
+    try { detail = JSON.parse(body).detail || ""; } catch { detail = body.slice(0, 200); }
+    throw new Error(`HTTP ${r.status}${detail ? " · " + detail : ""}`);
+  }
   return r.json();
 }
 

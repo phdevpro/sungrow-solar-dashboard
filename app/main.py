@@ -144,6 +144,15 @@ def _api_error(exc: ISolarCloudError) -> HTTPException:
     return HTTPException(status_code=502, detail=str(exc))
 
 
+@app.exception_handler(httpx.HTTPError)
+async def httpx_error_handler(request: Request, exc: httpx.HTTPError):
+    # Network/HTTP failures talking to the upstream gateway (timeouts, DNS,
+    # 4xx/5xx) — surface the reason instead of a bare 500.
+    return JSONResponse(
+        {"detail": f"Upstream error: {type(exc).__name__}: {exc}"}, status_code=502
+    )
+
+
 @app.get("/api/plants")
 async def plants():
     try:
