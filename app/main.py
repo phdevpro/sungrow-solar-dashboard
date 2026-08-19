@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -40,6 +42,13 @@ def cache_put(key: str, value: dict) -> dict:
     return value
 
 
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+log = logging.getLogger("dashboard")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     missing = settings.validate()
@@ -48,6 +57,16 @@ async def lifespan(app: FastAPI):
             f"Missing configuration: {', '.join(missing)}. "
             "Copy .env.example to .env and fill in your credentials."
         )
+    # Config summary at startup — booleans and lengths only, never secrets.
+    log.info(
+        "config: gateway=%s force_ipv4=%s appkey_len=%d access_key_len=%d "
+        "auth_enabled=%s ev_ingest=%s(token_len=%d) twc_host=%s db=%s",
+        settings.gateway, settings.force_ipv4,
+        len(settings.appkey), len(settings.access_key),
+        auth.enabled(),
+        bool(settings.ev_ingest_token), len(settings.ev_ingest_token),
+        settings.twc_host or "-", storage.DB_PATH,
+    )
     storage.connect()
     task = asyncio.create_task(collector.run_forever())
     yield
@@ -381,13 +400,23 @@ _ev_last: dict = {}
 async def ev_ingest(request: Request):
     """Push endpoint for the home twc-agent. Bearer-token authenticated."""
     if not settings.ev_ingest_token:
+        log.warning("ev/ingest rejected: EV_INGEST_TOKEN not set on this server")
         raise HTTPException(status_code=404, detail="EV ingest not configured")
     header = request.headers.get("authorization", "")
     token = header.removeprefix("Bearer ").strip()
     import hmac as _hmac
     if not _hmac.compare_digest(token, settings.ev_ingest_token):
+        log.warning(
+            "ev/ingest rejected: token mismatch (got len=%d, expected len=%d)",
+            len(token), len(settings.ev_ingest_token),
+        )
         raise HTTPException(status_code=401, detail="Bad token")
     payload = await request.json()
+    log.info(
+        "ev/ingest ok: connected=%s charging=%s power=%sW session=%sWh",
+        payload.get("vehicle_connected"), payload.get("charging"),
+        payload.get("power_w"), payload.get("session_wh"),
+    )
     sample = {
         "vehicle_connected": bool(payload.get("vehicle_connected")),
         "charging": bool(payload.get("charging")),
