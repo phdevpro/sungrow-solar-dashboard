@@ -1,20 +1,13 @@
 # Portainer stack for Sungrow Solar Dashboard.
-# Pulls the prebuilt multi-arch image (amd64 / arm64) from GHCR — no build
-# on the host. Fill in the environment variables below (or define them as
-# stack environment variables in Portainer and reference them as ${VAR}).
-#
-# Traefik: labels below assume a Traefik v2/v3 instance watching Docker,
-# an external network named "traefik", a "websecure" entrypoint and a
-# certificate resolver named "letsencrypt" — adjust those three names to
-# match your setup. Set DASH_DOMAIN (e.g. solar.example.com) as a stack
-# environment variable. With Traefik in front you can drop the "ports:"
-# mapping entirely.
+# Pulls the prebuilt multi-arch image (amd64 / arm64) from GHCR.
+# Set as stack environment variables: ISC_APPKEY, ISC_ACCESS_KEY,
+# ISC_USERNAME, ISC_PASSWORD, DASH_USER, DASH_PASSWORD, DASH_DOMAIN.
+# Adjust the Traefik network name ("reverse-proxy" below) and the
+# entrypoint/certresolver names to match your Traefik instance.
 
 services:
   dashboard:
     image: ghcr.io/phdevpro/sungrow-solar-dashboard:latest
-    ports:
-      - "8000:8000"   # remove if only reachable through Traefik
     environment:
       ISC_GATEWAY: https://gateway.isolarcloud.eu
       ISC_APPKEY: ${ISC_APPKEY}
@@ -22,31 +15,37 @@ services:
       ISC_USERNAME: ${ISC_USERNAME}
       ISC_PASSWORD: ${ISC_PASSWORD}
       ISC_DB_PATH: /data/solar.db
-      # Dashboard login (recommended when exposed beyond your LAN)
       DASH_USER: ${DASH_USER}
       DASH_PASSWORD: ${DASH_PASSWORD}
     volumes:
       - solar_data:/data
     networks:
-      - traefik
+      - reverse-proxy   # ingress from Traefik
+      - egress          # plain bridge for outbound internet (API calls)
     labels:
-      - traefik.enable=true
-      - traefik.docker.network=traefik
-      - traefik.http.routers.solar.rule=Host(`${DASH_DOMAIN}`)
-      - traefik.http.routers.solar.entrypoints=websecure
-      - traefik.http.routers.solar.tls=true
-      - traefik.http.routers.solar.tls.certresolver=letsencrypt
-      - traefik.http.services.solar.loadbalancer.server.port=8000
-      # Optional: redirect plain HTTP to HTTPS (needs a "web" entrypoint)
-      # - traefik.http.routers.solar-http.rule=Host(`${DASH_DOMAIN}`)
-      # - traefik.http.routers.solar-http.entrypoints=web
-      # - traefik.http.routers.solar-http.middlewares=solar-https
-      # - traefik.http.middlewares.solar-https.redirectscheme.scheme=https
+      - "traefik.enable=true"
+      - "traefik.docker.network=reverse-proxy"
+
+      # HTTPS router (Let's Encrypt)
+      - "traefik.http.routers.solar.rule=Host(`${DASH_DOMAIN}`)"
+      - "traefik.http.routers.solar.entrypoints=websecure"
+      - "traefik.http.routers.solar.tls=true"
+      - "traefik.http.routers.solar.tls.certresolver=letsencrypt"
+      - "traefik.http.services.solar.loadbalancer.server.port=8000"
+
+      # HTTP → HTTPS redirect
+      - "traefik.http.routers.solar-http.rule=Host(`${DASH_DOMAIN}`)"
+      - "traefik.http.routers.solar-http.entrypoints=web"
+      - "traefik.http.routers.solar-http.middlewares=solar-redirect"
+      - "traefik.http.middlewares.solar-redirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.solar-redirect.redirectscheme.permanent=true"
     restart: unless-stopped
 
 networks:
-  traefik:
+  reverse-proxy:
     external: true
+  egress:
+    driver: bridge
 
 volumes:
   solar_data:
