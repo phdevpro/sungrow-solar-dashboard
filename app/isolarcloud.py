@@ -17,6 +17,13 @@ from .config import settings
 SYS_CODE = "901"
 
 
+def make_transport() -> httpx.AsyncHTTPTransport | None:
+    """Binding the local address to 0.0.0.0 restricts httpx to IPv4."""
+    if settings.force_ipv4:
+        return httpx.AsyncHTTPTransport(local_address="0.0.0.0")
+    return None
+
+
 class ISolarCloudError(Exception):
     def __init__(self, code: str, message: str):
         self.code = code
@@ -25,7 +32,9 @@ class ISolarCloudError(Exception):
 
 class ISolarCloudClient:
     def __init__(self) -> None:
-        self._http = httpx.AsyncClient(base_url=settings.gateway, timeout=30)
+        self._http = httpx.AsyncClient(
+            base_url=settings.gateway, timeout=30, transport=make_transport()
+        )
         self._token: str | None = None
         self._token_time: float = 0.0
         # Tokens are valid for a while server-side; re-login proactively after 23h.

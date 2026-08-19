@@ -12,6 +12,11 @@ class Settings:
     username: str = os.getenv("ISC_USERNAME", "")
     password: str = os.getenv("ISC_PASSWORD", "")
 
+    # Force outbound IPv4 (default on): the iSolarCloud gateway publishes
+    # AAAA records, and containers without working IPv6 hang in
+    # ConnectTimeout when the resolver hands out the v6 address first.
+    force_ipv4: bool = os.getenv("ISC_FORCE_IPV4", "1").lower() not in ("0", "false", "no")
+
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")
     dash_password: str = os.getenv("DASH_PASSWORD", "")

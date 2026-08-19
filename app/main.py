@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from . import auth, collector, storage
 from .collector import POWER_POINT
 from .config import settings
-from .isolarcloud import ISolarCloudError, client
+from .isolarcloud import ISolarCloudError, client, make_transport
 
 _device_cache: dict[str, tuple[float, list[dict]]] = {}
 _response_cache: dict[str, tuple[float, dict]] = {}
@@ -349,7 +349,7 @@ async def plant_weather(ps_id: str, date: str | None = None):
         raise HTTPException(status_code=404, detail="Plant coordinates not available")
 
     iso = f"{date[:4]}-{date[4:6]}-{date[6:]}"
-    async with httpx.AsyncClient(timeout=15) as http:
+    async with httpx.AsyncClient(timeout=15, transport=make_transport()) as http:
         r = await http.get(
             "https://api.open-meteo.com/v1/forecast",
             params={
