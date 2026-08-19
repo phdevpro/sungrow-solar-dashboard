@@ -42,6 +42,21 @@ docker compose up -d
 
 Open http://localhost:8000. Collected history lands in `./data/solar.db`.
 
+### Prebuilt image / Portainer
+
+Every push to `main` publishes a multi-arch image (linux/amd64,
+linux/arm64 — Raspberry Pi 3+/4/5 with a 64-bit OS, Apple Silicon,
+most NAS) to GHCR:
+
+```
+ghcr.io/phdevpro/sungrow-solar-dashboard:latest
+```
+
+For Portainer, create a stack from [`portainer-stack.yml`](portainer-stack.yml)
+and set `ISC_APPKEY`, `ISC_ACCESS_KEY`, `ISC_USERNAME`, `ISC_PASSWORD`
+as stack environment variables (adjust `ISC_GATEWAY` if you are not on
+the European site). History is stored in the `solar_data` named volume.
+
 To expose it on the internet without opening ports, put a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 in front and protect it with Cloudflare Access.

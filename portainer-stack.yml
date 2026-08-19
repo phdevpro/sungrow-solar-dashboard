@@ -1,0 +1,23 @@
+# Portainer stack for Sungrow Solar Dashboard.
+# Pulls the prebuilt multi-arch image (amd64 / arm64) from GHCR — no build
+# on the host. Fill in the environment variables below (or define them as
+# stack environment variables in Portainer and reference them as ${VAR}).
+
+services:
+  dashboard:
+    image: ghcr.io/phdevpro/sungrow-solar-dashboard:latest
+    ports:
+      - "8000:8000"
+    environment:
+      ISC_GATEWAY: https://gateway.isolarcloud.eu
+      ISC_APPKEY: ${ISC_APPKEY}
+      ISC_ACCESS_KEY: ${ISC_ACCESS_KEY}
+      ISC_USERNAME: ${ISC_USERNAME}
+      ISC_PASSWORD: ${ISC_PASSWORD}
+      ISC_DB_PATH: /data/solar.db
+    volumes:
+      - solar_data:/data
+    restart: unless-stopped
+
+volumes:
+  solar_data:
