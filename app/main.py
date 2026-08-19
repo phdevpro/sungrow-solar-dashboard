@@ -10,7 +10,7 @@ import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import auth, collector, storage, wallconnector
+from . import auth, collector, renault, storage, wallconnector
 from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
@@ -72,6 +72,7 @@ async def lifespan(app: FastAPI):
     yield
     task.cancel()
     await client.close()
+    await renault.car.close()
     storage.close()
 
 
@@ -445,6 +446,59 @@ async def ev_status():
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Wall Connector: {exc}")
     raise HTTPException(status_code=404, detail="No EV data")
+
+
+# ---- Renault car ----------------------------------------------------------
+
+
+@app.get("/api/car")
+async def car_status():
+    if not renault.enabled():
+        raise HTTPException(status_code=404, detail="Renault account not configured")
+    cached = cache_get("car", 120)
+    if cached is not None:
+        return cached
+    try:
+        status = await renault.car.status()
+        status["charge_mode"] = await renault.car.charge_mode()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Renault API: {exc}")
+    status["auto"] = collector.auto_state["enabled"]
+    return cache_put("car", status)
+
+
+@app.post("/api/car/charge/resume")
+async def car_resume():
+    if not renault.enabled():
+        raise HTTPException(status_code=404, detail="Renault account not configured")
+    try:
+        await renault.car.resume_charge()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Renault API: {exc}")
+    _response_cache.pop("car", None)
+    log.info("manual charge resume requested")
+    return {"ok": True}
+
+
+@app.post("/api/car/charge/pause")
+async def car_pause():
+    if not renault.enabled():
+        raise HTTPException(status_code=404, detail="Renault account not configured")
+    try:
+        await renault.car.pause_charge()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Renault API: {exc}")
+    _response_cache.pop("car", None)
+    log.info("manual charge pause requested")
+    return {"ok": True}
+
+
+@app.post("/api/car/auto")
+async def car_auto(request: Request):
+    body = await request.json()
+    collector.auto_state["enabled"] = bool(body.get("enabled"))
+    log.info("solar-surplus auto charging: %s", collector.auto_state["enabled"])
+    return {"auto": collector.auto_state["enabled"]}
 
 
 @app.get("/api/ev/history")
