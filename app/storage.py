@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS battery_samples (
     current REAL,
     PRIMARY KEY (sn, ts)
 );
+CREATE TABLE IF NOT EXISTS flow_samples (
+    ps_id   TEXT NOT NULL,
+    ts      TEXT NOT NULL,
+    pv_w    REAL,               -- PV production (DC)
+    load_w  REAL,               -- house consumption
+    grid_w  REAL,               -- + import from grid / - export to grid
+    batt_w  REAL,               -- + charging / - discharging
+    soc     REAL,
+    PRIMARY KEY (ps_id, ts)
+);
 CREATE TABLE IF NOT EXISTS plant_kpi (
     ps_id        TEXT NOT NULL,
     ts           TEXT NOT NULL,
@@ -114,6 +124,28 @@ def store_kpi(ps_id: str, ts: str, curr_power_w, today_kwh, total_kwh) -> None:
         "VALUES (?, ?, ?, ?, ?)",
         [(ps_id, ts, curr_power_w, today_kwh, total_kwh)],
     )
+
+
+def store_flow(ps_id: str, ts: str, flow: dict[str, Any]) -> None:
+    _execmany(
+        "INSERT OR REPLACE INTO flow_samples (ps_id, ts, pv_w, load_w, grid_w, batt_w, soc) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(ps_id, ts, flow.get("pv_w"), flow.get("load_w"), flow.get("grid_w"),
+          flow.get("batt_w"), flow.get("soc"))],
+    )
+
+
+def load_flow_day(ps_id: str, date: str) -> list[dict[str, Any]]:
+    with _lock:
+        cur = connect().execute(
+            "SELECT ts, pv_w, load_w, grid_w, batt_w, soc FROM flow_samples "
+            "WHERE ps_id = ? AND ts LIKE ? ORDER BY ts",
+            (ps_id, f"{date}%"),
+        )
+        return [
+            {"t": ts[8:12], "pv_w": pv, "load_w": lo, "grid_w": gr, "batt_w": ba, "soc": soc}
+            for ts, pv, lo, gr, ba, soc in cur.fetchall()
+        ]
 
 
 def load_power_day(ps_id: str, date: str) -> list[dict[str, Any]]:

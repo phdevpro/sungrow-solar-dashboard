@@ -16,6 +16,49 @@ INTERVAL = 300  # seconds; the cloud updates device data every 5 minutes
 # Inverter/ESS production-power point per device type.
 POWER_POINT = {14: "p13003", 1: "p24"}
 
+# ESS (type 14) energy-flow points, per the official measuring-point table:
+# 13003 total DC (PV) W, 13011 active power W, 13119 load W, 13121 feed-in W,
+# 13149 purchased W, 13126 battery charging W, 13150 battery discharging W,
+# 13141 SOC; daily energies: 13112 PV, 13199 load, 13122 export, 13147 import,
+# 13028 battery charge, 13029 battery discharge.
+FLOW_POINTS = [
+    "13003", "13011", "13119", "13121", "13149", "13126", "13150", "13141",
+    "13112", "13199", "13122", "13147", "13028", "13029",
+]
+
+
+async def fetch_flow(ess_ps_key: str) -> dict | None:
+    """Realtime energy flow snapshot from the ESS inverter."""
+    data = await client.get_device_realtime_data([ess_ps_key], FLOW_POINTS, device_type=14)
+    points = [x["device_point"] for x in data.get("device_point_list", [])]
+    if not points:
+        return None
+    p = points[0]
+    g = lambda k: _f(p.get(k))
+    imp, exp = g("p13149") or 0.0, g("p13121") or 0.0
+    chg, dis = g("p13126") or 0.0, g("p13150") or 0.0
+    return {
+        "pv_w": g("p13003"),
+        "ac_w": g("p13011"),
+        "load_w": g("p13119"),
+        "grid_import_w": imp,
+        "grid_export_w": exp,
+        "grid_w": imp - exp,          # + import / - export
+        "batt_charge_w": chg,
+        "batt_discharge_w": dis,
+        "batt_w": chg - dis,          # + charging / - discharging
+        "soc": g("p13141"),
+        "time": p.get("device_time"),
+        "today": {
+            "pv_wh": g("p13112"),
+            "load_wh": g("p13199"),
+            "export_wh": g("p13122"),
+            "import_wh": g("p13147"),
+            "batt_charge_wh": g("p13028"),
+            "batt_discharge_wh": g("p13029"),
+        },
+    }
+
 
 async def _collect_plant(plant: dict) -> None:
     ps_id = str(plant["ps_id"])
@@ -75,6 +118,15 @@ async def _collect_plant(plant: dict) -> None:
             ])
     except ISolarCloudError as exc:
         log.warning("optimizer snapshot failed for %s: %s", ps_id, exc)
+
+    # Energy-flow snapshot (PV / load / grid / battery).
+    if inverter and inverter.get("device_type") == 14:
+        try:
+            flow = await fetch_flow(inverter["ps_key"])
+            if flow:
+                storage.store_flow(ps_id, flow.get("time") or now, flow)
+        except ISolarCloudError as exc:
+            log.warning("flow snapshot failed for %s: %s", ps_id, exc)
 
     # Battery snapshot.
     batteries = [d for d in devices if d.get("device_type") == 43]

@@ -9,7 +9,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
 from . import auth, collector, storage
-from .collector import POWER_POINT
+from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
 
@@ -155,11 +155,14 @@ async def httpx_error_handler(request: Request, exc: httpx.HTTPError):
 
 @app.get("/api/plants")
 async def plants():
+    cached = cache_get("plants", 55)
+    if cached is not None:
+        return cached
     try:
         result = await client.get_power_station_list()
     except ISolarCloudError as exc:
         raise _api_error(exc)
-    return result
+    return cache_put("plants", result)
 
 
 @app.get("/api/plants/{ps_id}/kpi")
@@ -182,11 +185,14 @@ async def plant_detail(ps_id: str):
 
 @app.get("/api/plants/{ps_id}/devices")
 async def plant_devices(ps_id: str):
+    cached = cache_get(f"devices:{ps_id}", 600)
+    if cached is not None:
+        return cached
     try:
         result = await client.get_device_list(ps_id)
     except ISolarCloudError as exc:
         raise _api_error(exc)
-    return result
+    return cache_put(f"devices:{ps_id}", result)
 
 
 @app.get("/api/plants/{ps_id}/curve")
@@ -235,7 +241,7 @@ async def plant_curve(ps_id: str, date: str | None = None):
 @app.get("/api/plants/{ps_id}/panels")
 async def plant_panels(ps_id: str):
     """Per-panel (optimizer) realtime output power and lifetime yield."""
-    cached = cache_get(f"panels:{ps_id}", 55)
+    cached = cache_get(f"panels:{ps_id}", 240)
     if cached is not None:
         return cached
     try:
@@ -274,7 +280,7 @@ async def plant_panels(ps_id: str):
 @app.get("/api/plants/{ps_id}/batteries")
 async def plant_batteries(ps_id: str):
     """Per-battery SOC/SOH/temperature plus system-level SOC from the ESS."""
-    cached = cache_get(f"batteries:{ps_id}", 55)
+    cached = cache_get(f"batteries:{ps_id}", 240)
     if cached is not None:
         return cached
     try:
@@ -315,21 +321,54 @@ async def plant_batteries(ps_id: str):
             )
         if ess:
             data = await client.get_device_realtime_data(
-                [ess["ps_key"]], ["13141", "13142"], device_type=14
+                [ess["ps_key"]], ["13141", "13142", "13140"], device_type=14
             )
             points = [x["device_point"] for x in data.get("device_point_list", [])]
             if points:
                 p = points[0]
-                try:
+
+                def numf(k):
+                    try:
+                        return float(p.get(k))
+                    except (TypeError, ValueError):
+                        return None
+
+                if numf("p13141") is not None:
                     result["system"] = {
-                        "soc": float(p.get("p13141")),
-                        "soh": float(p.get("p13142")),
+                        "soc": numf("p13141"),
+                        "soh": numf("p13142"),
+                        # p13140: total battery capacity in Wh
+                        "capacity_wh": numf("p13140"),
                     }
-                except (TypeError, ValueError):
-                    pass
     except ISolarCloudError as exc:
         raise _api_error(exc)
     return cache_put(f"batteries:{ps_id}", result)
+
+
+@app.get("/api/plants/{ps_id}/flow")
+async def plant_flow(ps_id: str):
+    """Live energy flow: PV, house load, grid import/export, battery."""
+    cached = cache_get(f"flow:{ps_id}", 60)
+    if cached is not None:
+        return cached
+    try:
+        devices = await cached_devices(ps_id)
+        ess = next((d for d in devices if d.get("device_type") == 14), None)
+        if ess is None:
+            raise HTTPException(status_code=404, detail="No hybrid/ESS inverter in plant")
+        flow = await fetch_flow(ess["ps_key"])
+    except ISolarCloudError as exc:
+        raise _api_error(exc)
+    if flow is None:
+        raise HTTPException(status_code=502, detail="No flow data from inverter")
+    return cache_put(f"flow:{ps_id}", flow)
+
+
+@app.get("/api/plants/{ps_id}/flow/history")
+async def flow_history(ps_id: str, date: str | None = None):
+    """Day series of flow samples from the local DB (collector, 5-min)."""
+    date = date or datetime.now().strftime("%Y%m%d")
+    return {"date": date, "samples": storage.load_flow_day(ps_id, date)}
 
 
 @app.get("/api/plants/{ps_id}/weather")
