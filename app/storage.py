@@ -133,9 +133,12 @@ def store_kpi(ps_id: str, ts: str, curr_power_w, today_kwh, total_kwh) -> None:
     )
 
 
-def store_flow(ps_id: str, ts: str, flow: dict[str, Any]) -> None:
+def store_flow(ps_id: str, ts: str, flow: dict[str, Any], replace: bool = True) -> None:
+    """replace=False keeps existing rows intact (used by API backfill, whose
+    rows lack pv/soc and must not clobber richer collector samples)."""
+    verb = "REPLACE" if replace else "IGNORE"
     _execmany(
-        "INSERT OR REPLACE INTO flow_samples (ps_id, ts, pv_w, load_w, grid_w, batt_w, soc) "
+        f"INSERT OR {verb} INTO flow_samples (ps_id, ts, pv_w, load_w, grid_w, batt_w, soc) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         [(ps_id, ts, flow.get("pv_w"), flow.get("load_w"), flow.get("grid_w"),
           flow.get("batt_w"), flow.get("soc"))],

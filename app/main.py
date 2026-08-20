@@ -384,11 +384,49 @@ async def plant_flow(ps_id: str):
     return cache_put(f"flow:{ps_id}", flow)
 
 
+FLOW_HISTORY_POINTS = "p13119,p13121,p13126,p13149,p13150"
+
+
 @app.get("/api/plants/{ps_id}/flow/history")
 async def flow_history(ps_id: str, date: str | None = None):
-    """Day series of flow samples from the local DB (collector, 5-min)."""
+    """Day series of flow samples: local DB first, API backfill for gaps."""
     date = date or datetime.now().strftime("%Y%m%d")
-    return {"date": date, "samples": storage.load_flow_day(ps_id, date)}
+    today = datetime.now().strftime("%Y%m%d")
+
+    minutes = (datetime.now().hour * 60 + datetime.now().minute) if date == today else 1440
+    existing = storage.load_flow_day(ps_id, date)
+    if len(existing) >= (minutes / 5) * 0.8:
+        return {"date": date, "samples": existing, "source": "db"}
+
+    cached = cache_get(f"flowhist:{ps_id}:{date}", 270)
+    if cached is not None:
+        return cached
+    try:
+        devices = await cached_devices(ps_id)
+        ess = next((d for d in devices if d.get("device_type") == 14), None)
+        if ess is None:
+            return {"date": date, "samples": existing, "source": "db"}
+        samples = await client.get_day_curve(ess["ps_key"], FLOW_HISTORY_POINTS, date)
+    except ISolarCloudError:
+        return {"date": date, "samples": existing, "source": "db"}
+
+    def num(row, k):
+        try:
+            return float(row[k])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    for row in samples:
+        load = num(row, "p13119")
+        imp, exp = num(row, "p13149") or 0.0, num(row, "p13121") or 0.0
+        chg, dis = num(row, "p13126") or 0.0, num(row, "p13150") or 0.0
+        storage.store_flow(ps_id, row["time_stamp"], {
+            "pv_w": None, "load_w": load,
+            "grid_w": imp - exp, "batt_w": chg - dis, "soc": None,
+        }, replace=False)
+    return cache_put(f"flowhist:{ps_id}:{date}", {
+        "date": date, "samples": storage.load_flow_day(ps_id, date), "source": "api",
+    })
 
 
 # ---- EV (Tesla Wall Connector) --------------------------------------------
