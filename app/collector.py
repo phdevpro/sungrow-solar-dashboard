@@ -188,6 +188,10 @@ async def _miele_auto_start(flow: dict) -> None:
         return
     if (flow.get("grid_export_w") or 0) < settings.miele_auto_surplus_w:
         return
+    # Never drain a low house battery into an appliance start.
+    soc = flow.get("soc")
+    if soc is None or soc < settings.miele_auto_min_soc:
+        return
     try:
         devices = await miele.get_devices()
         candidate = next((d for d in devices if d["startable"]), None)

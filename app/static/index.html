@@ -914,7 +914,7 @@ function renderAppliances(el, data) {
         <span class="sub">
           <label class="auto-toggle">
             <input type="checkbox" ${data.auto ? "checked" : ""}>
-            Start on solar surplus (&gt; ${(data.surplus_w / 1000).toFixed(1)} kW export)
+            Start on solar surplus (&gt; ${(data.surplus_w / 1000).toFixed(1)} kW export, battery ≥ ${Math.round((data.min_soc ?? 0) * 100)}%)
           </label>
         </span>
       </h3>

@@ -34,6 +34,9 @@ class Settings:
     # exceeds this threshold (default off; UI can toggle).
     miele_auto: bool = os.getenv("MIELE_AUTO", "0").lower() in ("1", "true", "yes")
     miele_auto_surplus_w: float = float(os.getenv("MIELE_AUTO_SURPLUS_W", "1000"))
+    # Don't auto-start unless the house battery is at least this charged
+    # (fraction, 0.2 = 20%).
+    miele_auto_min_soc: float = float(os.getenv("MIELE_AUTO_MIN_SOC", "0.2"))
 
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")

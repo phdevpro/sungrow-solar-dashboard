@@ -536,6 +536,7 @@ async def miele_devices():
         "connected": True, "devices": devices,
         "auto": collector.miele_auto["enabled"],
         "surplus_w": settings.miele_auto_surplus_w,
+        "min_soc": settings.miele_auto_min_soc,
     })
 
 
