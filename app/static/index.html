@@ -134,6 +134,14 @@
   .panel .w { font-size: 0.92rem; font-weight: 600; }
   .panel.dead { border: 1px dashed #ec835a; color: var(--ink-2); }
   .panel.dead .w { font-size: 0.78rem; font-weight: 600; color: #ec835a; }
+  .deduced-note {
+    color: var(--muted); font-size: 0.78rem; margin-bottom: 0.9rem;
+    border-left: 3px solid var(--accent); padding-left: 0.7rem;
+  }
+  .deduced-note b { color: var(--ink-2); }
+  .string-group { margin-bottom: 1rem; }
+  .string-group:last-child { margin-bottom: 0; }
+  .string-head { font-size: 0.85rem; font-weight: 600; color: var(--ink-2); margin-bottom: 0.5rem; }
 
   /* Batteries */
   .batt-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
@@ -473,7 +481,34 @@ const RAMP_LIGHT = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184
 const RAMP_DARK  = ["#0d366b", "#104281", "#184f95", "#1c5cab", "#256abf", "#3987e5"];
 const isDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
 
-function renderPanels(container, sub, data) {
+function panelTile(p, i, max, ramp) {
+  const w = p.power_w;
+  // No device_time at all = the optimizer has never reported to the cloud.
+  if (!p.reporting) {
+    return `<div class="panel dead"
+      title="Panel ${i + 1} · SN ${p.sn ?? "?"} · optimizer is not communicating: no data has ever been received from this unit. Check wiring/pairing or contact the installer.">
+      <span class="n">#${i + 1}</span>
+      <span class="w">⚠ No data</span>
+    </div>`;
+  }
+  const frac = w == null ? 0 : w / max;
+  const idx = Math.min(ramp.length - 1, Math.floor(frac * ramp.length));
+  const bg = w == null ? "transparent" : ramp[idx];
+  // Ink flips by step luminance: light-mode steps 0-2 are light fills, dark-mode steps 3+ approach mid-blue.
+  const dark = isDark() ? idx >= ramp.length : idx >= 3;
+  const ink = w == null ? "var(--muted)" : (isDark() ? "#ffffff" : (dark ? "#ffffff" : "#0b0b0b"));
+  const kwh = p.total_wh == null ? "—" : (p.total_wh / 1000).toFixed(1);
+  const lowConf = p._conf != null && p._conf < 0.1;
+  const conf = p._conf != null
+    ? ` · string confidence ${p._conf}${lowConf ? " (low — assignment uncertain)" : ""}` : "";
+  return `<div class="panel" style="background:${bg};color:${ink}"
+    title="Panel ${i + 1} · SN ${p.sn ?? "?"} · now ${w == null ? "—" : w.toFixed(0)} W · lifetime ${kwh} kWh${conf}">
+    <span class="n">#${i + 1}${lowConf ? " ≈" : ""}</span>
+    <span class="w">${w == null ? "—" : w.toFixed(0)} W</span>
+  </div>`;
+}
+
+function renderPanels(container, sub, data, strMap) {
   const panels = data.panels || [];
   if (!panels.length) {
     container.innerHTML = '<div class="muted">No optimizers found.</div>';
@@ -486,31 +521,46 @@ function renderPanels(container, sub, data) {
   sub.textContent = `${panels.length} optimizers · ${(total / 1000).toFixed(2)} kW now`
     + (dead ? ` · ⚠ ${dead} not communicating` : "");
 
-  container.innerHTML = `<div class="panel-grid">
-    ${panels.map((p, i) => {
-      const w = p.power_w;
-      // No device_time at all = the optimizer has never reported to the cloud.
-      if (!p.reporting) {
-        return `<div class="panel dead"
-          title="Panel ${i + 1} · SN ${p.sn ?? "?"} · optimizer is not communicating: no data has ever been received from this unit. Check wiring/pairing or contact the installer.">
-          <span class="n">#${i + 1}</span>
-          <span class="w">⚠ No data</span>
-        </div>`;
-      }
-      const frac = w == null ? 0 : w / max;
-      const idx = Math.min(ramp.length - 1, Math.floor(frac * ramp.length));
-      const bg = w == null ? "transparent" : ramp[idx];
-      // Ink flips by step luminance: light-mode steps 0-2 are light fills, dark-mode steps 3+ approach mid-blue.
-      const dark = isDark() ? idx >= ramp.length : idx >= 3;
-      const ink = w == null ? "var(--muted)" : (isDark() ? "#ffffff" : (dark ? "#ffffff" : "#0b0b0b"));
-      const kwh = p.total_wh == null ? "—" : (p.total_wh / 1000).toFixed(1);
-      return `<div class="panel" style="background:${bg};color:${ink}"
-        title="Panel ${i + 1} · SN ${p.sn ?? "?"} · now ${w == null ? "—" : w.toFixed(0)} W · lifetime ${kwh} kWh">
-        <span class="n">#${i + 1}</span>
-        <span class="w">${w == null ? "—" : w.toFixed(0)} W</span>
-      </div>`;
-    }).join("")}
-  </div>`;
+  // Attach the deduced string (if the mapping endpoint returned one).
+  const byKey = {};
+  (strMap?.panels || []).forEach(m => { byKey[m.ps_key] = m; });
+  panels.forEach(p => {
+    const m = byKey[p.ps_key];
+    p._string = m?.string ?? null;
+    p._conf = m?.confidence ?? null;
+  });
+
+  if (!strMap) {
+    container.innerHTML = `<div class="panel-grid">
+      ${panels.map((p, i) => panelTile(p, i, max, ramp)).join("")}
+    </div>`;
+    return;
+  }
+
+  const groups = [
+    { label: "String A · MPPT1", panels: [] },
+    { label: "String B · MPPT2", panels: [] },
+    { label: "Unassigned", panels: [] },
+  ];
+  panels.forEach((p, i) => {
+    const g = p._string === 1 ? 0 : p._string === 2 ? 1 : 2;
+    groups[g].panels.push([p, i]);
+  });
+
+  container.innerHTML = `
+    <div class="deduced-note">Raggruppamento per stringa <b>dedotto</b> dalla correlazione
+      delle curve di potenza dei pannelli con i due ingressi MPPT dell'inverter
+      (dati del ${strMap.date?.slice(6)}/${strMap.date?.slice(4, 6)}) — l'API non espone il cablaggio reale.
+      I pannelli marcati "≈" hanno bassa confidenza.</div>
+    ${groups.filter(g => g.panels.length).map(g => `
+      <div class="string-group">
+        <div class="string-head">${g.label}
+          <span class="muted">· ${g.panels.length} panels
+          · ${(g.panels.reduce((a, [p]) => a + (p.power_w ?? 0), 0) / 1000).toFixed(2)} kW now</span></div>
+        <div class="panel-grid">
+          ${g.panels.map(([p, i]) => panelTile(p, i, max, ramp)).join("")}
+        </div>
+      </div>`).join("")}`;
 }
 
 /* ---------------- Batteries ---------------- */
@@ -623,8 +673,12 @@ async function refresh() {
       Promise.all([getJSON(`/api/plants/${p.ps_id}/flow`), evP])
         .then(([flow, ev]) => renderFlow(flowSlot, el.querySelector(".flow-sub"), flow, ev))
         .catch(e => { flowSlot.innerHTML = `<div class="error">${e.message}</div>`; });
-      loadSection(`/api/plants/${p.ps_id}/panels`, renderPanels,
-        el.querySelector(".panels-slot"), el.querySelector(".panels-sub"));
+      const panelsSlot = el.querySelector(".panels-slot");
+      const stringsP = getJSON(`/api/plants/${p.ps_id}/strings`).catch(() => null);
+      Promise.all([getJSON(`/api/plants/${p.ps_id}/panels`), stringsP])
+        .then(([panels, strMap]) =>
+          renderPanels(panelsSlot, el.querySelector(".panels-sub"), panels, strMap))
+        .catch(e => { panelsSlot.innerHTML = `<div class="error">${e.message}</div>`; });
       loadSection(`/api/plants/${p.ps_id}/batteries`, renderBatteries,
         el.querySelector(".batt-slot"), el.querySelector(".batt-sub"));
       loadDevices(p.ps_id, el.querySelector(".devices-slot"));

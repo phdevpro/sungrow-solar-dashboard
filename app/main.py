@@ -3,14 +3,14 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import auth, collector, storage, wallconnector
+from . import auth, collector, storage, strings, wallconnector
 from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
@@ -451,6 +451,32 @@ async def ev_status():
 async def ev_history(date: str | None = None):
     date = date or datetime.now().strftime("%Y%m%d")
     return {"date": date, "samples": storage.load_ev_day(date)}
+
+
+@app.get("/api/plants/{ps_id}/strings")
+async def plant_strings(ps_id: str):
+    """Deduced panel-to-MPPT-string mapping (correlation, cached 24h)."""
+    # Yesterday: a full day of data gives a stable correlation.
+    date = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+    cached = cache_get(f"strings:{ps_id}:{date}", 24 * 3600)
+    if cached is not None:
+        return cached
+    try:
+        devices = await cached_devices(ps_id)
+        ess = next((d for d in devices if d.get("device_type") == 14), None)
+        if ess is None:
+            raise HTTPException(status_code=404, detail="No hybrid/ESS inverter in plant")
+        optimizers = await client.get_optimizer_list(ps_id)
+        if not optimizers:
+            raise HTTPException(status_code=404, detail="No optimizers in plant")
+        result = await strings.deduce(
+            [o["ps_key"] for o in optimizers],
+            {o["ps_key"]: o.get("sn") for o in optimizers},
+            ess["ps_key"], date,
+        )
+    except ISolarCloudError as exc:
+        raise _api_error(exc)
+    return cache_put(f"strings:{ps_id}:{date}", result)
 
 
 @app.get("/api/plants/{ps_id}/weather")
