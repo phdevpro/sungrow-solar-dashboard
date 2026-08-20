@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS kv (
     k TEXT PRIMARY KEY,
     v TEXT
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key     TEXT PRIMARY KEY,
+    value   TEXT NOT NULL,
+    updated TEXT NOT NULL       -- ISO timestamp of the last change
+);
 CREATE TABLE IF NOT EXISTS plant_kpi (
     ps_id        TEXT NOT NULL,
     ts           TEXT NOT NULL,
@@ -134,6 +139,22 @@ def store_kpi(ps_id: str, ts: str, curr_power_w, today_kwh, total_kwh) -> None:
         "INSERT OR REPLACE INTO plant_kpi (ps_id, ts, curr_power_w, today_kwh, total_kwh) "
         "VALUES (?, ?, ?, ?, ?)",
         [(ps_id, ts, curr_power_w, today_kwh, total_kwh)],
+    )
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    with _lock:
+        row = connect().execute(
+            "SELECT value FROM settings WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else default
+
+
+def set_setting(key: str, value: str) -> None:
+    import datetime
+    _execmany(
+        "INSERT OR REPLACE INTO settings (key, value, updated) VALUES (?, ?, ?)",
+        [(key, value, datetime.datetime.now().isoformat(timespec="seconds"))],
     )
 
 

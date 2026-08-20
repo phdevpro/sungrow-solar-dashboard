@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
         settings.twc_host or "-", storage.DB_PATH,
     )
     storage.connect()
+    collector.load_miele_auto()
     task = asyncio.create_task(collector.run_forever())
     yield
     task.cancel()
@@ -556,7 +557,7 @@ async def miele_start(device_id: str):
 @app.post("/api/miele/auto")
 async def miele_auto_toggle(request: Request):
     body = await request.json()
-    collector.miele_auto["enabled"] = bool(body.get("enabled"))
+    collector.set_miele_auto(bool(body.get("enabled")))
     log.info("miele solar-surplus auto-start: %s", collector.miele_auto["enabled"])
     _response_cache.pop("miele", None)
     return {"auto": collector.miele_auto["enabled"]}

@@ -10,9 +10,21 @@ from . import miele, storage, wallconnector
 from .config import settings
 from .isolarcloud import ISolarCloudError, client
 
-# Solar-surplus appliance auto-start (seeded from env; the UI flips it).
+# Solar-surplus appliance auto-start. Persisted in the kv table so the
+# UI toggle survives restarts; the MIELE_AUTO env only seeds first boot.
 miele_auto = {"enabled": settings.miele_auto, "last_start_ts": 0.0}
 MIELE_COOLDOWN = 900  # don't start more than one appliance per 15 min
+
+
+def load_miele_auto() -> None:
+    saved = storage.get_setting("miele_auto")
+    if saved is not None:
+        miele_auto["enabled"] = saved == "1"
+
+
+def set_miele_auto(enabled: bool) -> None:
+    miele_auto["enabled"] = enabled
+    storage.set_setting("miele_auto", "1" if enabled else "0")
 
 log = logging.getLogger("collector")
 
