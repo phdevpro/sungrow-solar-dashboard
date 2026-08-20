@@ -10,7 +10,7 @@ import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import auth, collector, storage, strings, wallconnector
+from . import auth, collector, miele, storage, strings, wallconnector
 from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
@@ -483,6 +483,83 @@ async def ev_status():
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Wall Connector: {exc}")
     raise HTTPException(status_code=404, detail="No EV data")
+
+
+# ---- Miele appliances ------------------------------------------------------
+
+
+def _miele_redirect_uri(request: Request) -> str:
+    scheme = "https" if _is_https(request) else "http"
+    return f"{scheme}://{request.url.netloc}/api/miele/callback"
+
+
+@app.get("/api/miele/login")
+async def miele_login(request: Request):
+    if not miele.enabled():
+        raise HTTPException(status_code=404, detail="Miele app not configured")
+    import secrets
+    state = secrets.token_urlsafe(16)
+    storage.kv_put("miele_oauth_state", state)
+    return RedirectResponse(miele.auth_url(_miele_redirect_uri(request), state))
+
+
+@app.get("/api/miele/callback")
+async def miele_callback(request: Request, code: str = "", state: str = ""):
+    if not miele.enabled():
+        raise HTTPException(status_code=404, detail="Miele app not configured")
+    import hmac as _hmac
+    expected = storage.kv_get("miele_oauth_state") or ""
+    if not code or not expected or not _hmac.compare_digest(state, expected):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    try:
+        await miele.exchange_code(code, _miele_redirect_uri(request))
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"Miele token exchange failed: {exc}")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/api/miele/devices")
+async def miele_devices():
+    if not miele.enabled():
+        raise HTTPException(status_code=404, detail="Miele app not configured")
+    if not miele.connected():
+        return {"connected": False, "devices": [], "auto": collector.miele_auto["enabled"]}
+    cached = cache_get("miele", 60)
+    if cached is not None:
+        return cached
+    try:
+        devices = await miele.get_devices()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Miele API: {exc}")
+    return cache_put("miele", {
+        "connected": True, "devices": devices,
+        "auto": collector.miele_auto["enabled"],
+        "surplus_w": settings.miele_auto_surplus_w,
+    })
+
+
+@app.post("/api/miele/devices/{device_id}/start")
+async def miele_start(device_id: str):
+    if not (miele.enabled() and miele.connected()):
+        raise HTTPException(status_code=404, detail="Miele not connected")
+    try:
+        await miele.start(device_id)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Start refused ({exc.response.status_code}): is remote start enabled on the appliance?",
+        )
+    _response_cache.pop("miele", None)
+    return {"ok": True}
+
+
+@app.post("/api/miele/auto")
+async def miele_auto_toggle(request: Request):
+    body = await request.json()
+    collector.miele_auto["enabled"] = bool(body.get("enabled"))
+    log.info("miele solar-surplus auto-start: %s", collector.miele_auto["enabled"])
+    _response_cache.pop("miele", None)
+    return {"auto": collector.miele_auto["enabled"]}
 
 
 @app.get("/api/ev/history")

@@ -20,6 +20,10 @@ services:
       # Shared secret for the home twc-agent (Tesla Wall Connector push);
       # leave empty if you don't use the agent.
       EV_INGEST_TOKEN: ${EV_INGEST_TOKEN}
+      # Miele 3rd Party API (developer.miele.com); leave empty to disable.
+      # Register redirect URI: https://<DASH_DOMAIN>/api/miele/callback
+      MIELE_CLIENT_ID: ${MIELE_CLIENT_ID}
+      MIELE_CLIENT_SECRET: ${MIELE_CLIENT_SECRET}
     volumes:
       - solar_data:/data
     networks:

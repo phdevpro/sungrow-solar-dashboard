@@ -6,8 +6,13 @@ import logging
 import time
 from datetime import datetime
 
-from . import storage, wallconnector
+from . import miele, storage, wallconnector
+from .config import settings
 from .isolarcloud import ISolarCloudError, client
+
+# Solar-surplus appliance auto-start (seeded from env; the UI flips it).
+miele_auto = {"enabled": settings.miele_auto, "last_start_ts": 0.0}
+MIELE_COOLDOWN = 900  # don't start more than one appliance per 15 min
 
 log = logging.getLogger("collector")
 
@@ -125,6 +130,7 @@ async def _collect_plant(plant: dict) -> None:
             flow = await fetch_flow(inverter["ps_key"])
             if flow:
                 storage.store_flow(ps_id, flow.get("time") or now, flow)
+                await _miele_auto_start(flow)
         except ISolarCloudError as exc:
             log.warning("flow snapshot failed for %s: %s", ps_id, exc)
 
@@ -159,6 +165,30 @@ def _f(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+async def _miele_auto_start(flow: dict) -> None:
+    """Start one appliance waiting for remote start when the grid export
+    exceeds the surplus threshold. One start per cooldown window."""
+    if not (miele_auto["enabled"] and miele.enabled() and miele.connected()):
+        return
+    if time.time() - miele_auto["last_start_ts"] < MIELE_COOLDOWN:
+        return
+    if (flow.get("grid_export_w") or 0) < settings.miele_auto_surplus_w:
+        return
+    try:
+        devices = await miele.get_devices()
+        candidate = next((d for d in devices if d["startable"]), None)
+        if candidate is None:
+            return
+        await miele.start(candidate["id"])
+        miele_auto["last_start_ts"] = time.time()
+        log.info(
+            "miele auto-start: %s (%s) at export %.0f W",
+            candidate["name"], candidate["type"], flow.get("grid_export_w") or 0,
+        )
+    except Exception as exc:
+        log.warning("miele auto-start failed: %s", exc)
 
 
 async def collect_once() -> None:

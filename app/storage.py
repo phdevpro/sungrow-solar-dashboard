@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS ev_samples (
     connected  INTEGER,
     charging   INTEGER
 );
+CREATE TABLE IF NOT EXISTS kv (
+    k TEXT PRIMARY KEY,
+    v TEXT
+);
 CREATE TABLE IF NOT EXISTS plant_kpi (
     ps_id        TEXT NOT NULL,
     ts           TEXT NOT NULL,
@@ -131,6 +135,16 @@ def store_kpi(ps_id: str, ts: str, curr_power_w, today_kwh, total_kwh) -> None:
         "VALUES (?, ?, ?, ?, ?)",
         [(ps_id, ts, curr_power_w, today_kwh, total_kwh)],
     )
+
+
+def kv_get(key: str) -> str | None:
+    with _lock:
+        row = connect().execute("SELECT v FROM kv WHERE k = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+
+def kv_put(key: str, value: str) -> None:
+    _execmany("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", [(key, value)])
 
 
 def store_flow(ps_id: str, ts: str, flow: dict[str, Any], replace: bool = True) -> None:

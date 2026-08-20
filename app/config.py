@@ -25,6 +25,16 @@ class Settings:
     # Connector data to /api/ev/ingest. Ingest is disabled when unset.
     ev_ingest_token: str = os.getenv("EV_INGEST_TOKEN", "")
 
+    # Miele 3rd Party API (developer.miele.com): appliance status, remote
+    # start, and solar-surplus auto-start. Register an app there and set
+    # the redirect URI to https://<your-dashboard>/api/miele/callback.
+    miele_client_id: str = os.getenv("MIELE_CLIENT_ID", "")
+    miele_client_secret: str = os.getenv("MIELE_CLIENT_SECRET", "")
+    # Auto-start appliances waiting for remote start when grid export
+    # exceeds this threshold (default off; UI can toggle).
+    miele_auto: bool = os.getenv("MIELE_AUTO", "0").lower() in ("1", "true", "yes")
+    miele_auto_surplus_w: float = float(os.getenv("MIELE_AUTO_SURPLUS_W", "1000"))
+
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")
     dash_password: str = os.getenv("DASH_PASSWORD", "")
