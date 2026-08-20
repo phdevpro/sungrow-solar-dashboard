@@ -196,6 +196,25 @@ class ISolarCloudClient:
         samples.sort(key=lambda r: r["time_stamp"])
         return samples
 
+    async def get_daily_point_data(
+        self, ps_key: str, points: str, start: str, end: str
+    ) -> dict[str, list[dict]]:
+        """Daily aggregated point values (Wh) between start/end (YYYYMMDD,
+        max 100 days). Returns {point: [{'2': value, 'time_stamp': day}]}."""
+        result = await self._call(
+            "getDevicePointsDayMonthYearDataList",
+            {
+                "ps_key_list": [ps_key],
+                "data_point": points,
+                "query_type": "1",
+                "data_type": "2",
+                "start_time": start,
+                "end_time": end,
+                "order": "1",
+            },
+        )
+        return result.get(ps_key, {})
+
     # ---- Optimizers (MLPE) -------------------------------------------------
 
     async def get_optimizer_list(self, ps_id: int | str) -> list[dict[str, Any]]:

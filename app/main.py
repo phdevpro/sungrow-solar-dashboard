@@ -453,6 +453,84 @@ async def ev_history(date: str | None = None):
     return {"date": date, "samples": storage.load_ev_day(date)}
 
 
+# Daily-energy points on the ESS inverter (values in Wh).
+ENERGY_POINTS = {
+    "pv": "p13112",
+    "load": "p13199",
+    "direct": "p13116",      # daily direct (PV->load) consumption
+    "export": "p13122",
+    "import": "p13147",
+    "batt_charge": "p13028",
+    "batt_discharge": "p13029",
+}
+
+
+async def _daily_energy(ps_id: str, start: str, end: str) -> dict[str, dict[str, float]]:
+    """{day: {pv, load, export, import, batt_charge, batt_discharge}} in Wh."""
+    devices = await cached_devices(ps_id)
+    ess = next((d for d in devices if d.get("device_type") == 14), None)
+    if ess is None:
+        raise HTTPException(status_code=404, detail="No hybrid/ESS inverter in plant")
+    data = await client.get_daily_point_data(
+        ess["ps_key"], ",".join(ENERGY_POINTS.values()), start, end
+    )
+    days: dict[str, dict[str, float]] = {}
+    for name, point in ENERGY_POINTS.items():
+        for row in data.get(point, []):
+            try:
+                days.setdefault(row["time_stamp"], {})[name] = float(row["2"])
+            except (KeyError, TypeError, ValueError):
+                continue
+    # The daily endpoint doesn't expose p13199 (load): reconstruct it as
+    # direct PV consumption + grid import + battery discharge.
+    for v in days.values():
+        if "load" not in v and "direct" in v:
+            v["load"] = v["direct"] + v.get("import", 0.0) + v.get("batt_discharge", 0.0)
+    return days
+
+
+@app.get("/api/plants/{ps_id}/energy")
+async def plant_energy(ps_id: str, period: str = "month", date: str | None = None):
+    """Aggregated energy: period=month (daily rows, date=YYYYMM) or
+    period=year (monthly rows, date=YYYY)."""
+    now = datetime.now()
+    if period == "month":
+        date = date or now.strftime("%Y%m")
+        ttl = 3600 if date == now.strftime("%Y%m") else 24 * 3600
+        cached = cache_get(f"energy:m:{ps_id}:{date}", ttl)
+        if cached is not None:
+            return cached
+        try:
+            days = await _daily_energy(ps_id, f"{date}01", f"{date}31")
+        except ISolarCloudError as exc:
+            raise _api_error(exc)
+        rows = [{"t": d[6:], **v} for d, v in sorted(days.items())]
+        return cache_put(f"energy:m:{ps_id}:{date}", {"period": "month", "date": date, "rows": rows})
+
+    if period == "year":
+        date = date or now.strftime("%Y")
+        ttl = 3600 if date == now.strftime("%Y") else 24 * 3600
+        cached = cache_get(f"energy:y:{ps_id}:{date}", ttl)
+        if cached is not None:
+            return cached
+        # The API caps ranges at 100 days: fetch the year in four chunks.
+        chunks = [("0101", "0410"), ("0411", "0720"), ("0721", "1028"), ("1029", "1231")]
+        months: dict[str, dict[str, float]] = {}
+        try:
+            for a, b in chunks:
+                days = await _daily_energy(ps_id, f"{date}{a}", f"{date}{b}")
+                for d, v in days.items():
+                    m = months.setdefault(d[:6], {})
+                    for k, val in v.items():
+                        m[k] = m.get(k, 0.0) + val
+        except ISolarCloudError as exc:
+            raise _api_error(exc)
+        rows = [{"t": m[4:], **v} for m, v in sorted(months.items())]
+        return cache_put(f"energy:y:{ps_id}:{date}", {"period": "year", "date": date, "rows": rows})
+
+    raise HTTPException(status_code=400, detail="period must be month or year")
+
+
 @app.get("/api/plants/{ps_id}/strings")
 async def plant_strings(ps_id: str):
     """Deduced panel-to-MPPT-string mapping (correlation, cached 24h)."""
