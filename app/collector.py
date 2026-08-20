@@ -6,13 +6,8 @@ import logging
 import time
 from datetime import datetime
 
-from . import renault, storage, wallconnector
-from .config import settings
+from . import storage, wallconnector
 from .isolarcloud import ISolarCloudError, client
-
-# Runtime toggle for solar-surplus charging (seed from env; the UI flips it).
-auto_state = {"enabled": settings.ev_auto, "last_action": None, "last_action_ts": 0.0}
-AUTO_MIN_INTERVAL = 600  # seconds between charge commands
 
 log = logging.getLogger("collector")
 
@@ -130,7 +125,6 @@ async def _collect_plant(plant: dict) -> None:
             flow = await fetch_flow(inverter["ps_key"])
             if flow:
                 storage.store_flow(ps_id, flow.get("time") or now, flow)
-                await _auto_charge(flow)
         except ISolarCloudError as exc:
             log.warning("flow snapshot failed for %s: %s", ps_id, exc)
 
@@ -165,41 +159,6 @@ def _f(v):
         return float(v)
     except (TypeError, ValueError):
         return None
-
-
-async def _auto_charge(flow: dict) -> None:
-    """Solar-surplus charging: resume the car when exporting enough,
-    pause it when importing from the grid. Hysteresis + cooldown."""
-    if not (auto_state["enabled"] and renault.enabled()):
-        return
-    if time.time() - auto_state["last_action_ts"] < AUTO_MIN_INTERVAL:
-        return
-    export_w = flow.get("grid_export_w") or 0
-    import_w = flow.get("grid_import_w") or 0
-
-    action = None
-    if export_w > settings.ev_auto_resume_w:
-        action = "resume"
-    elif import_w > settings.ev_auto_pause_w:
-        action = "pause"
-    if action is None or action == auto_state["last_action"]:
-        return
-
-    try:
-        status = await renault.car.status()
-        if not status.get("plugged"):
-            return
-        if action == "resume" and not status.get("charging"):
-            await renault.car.resume_charge()
-        elif action == "pause" and status.get("charging"):
-            await renault.car.pause_charge()
-        else:
-            return
-        auto_state["last_action"] = action
-        auto_state["last_action_ts"] = time.time()
-        log.info("auto-charge: %s (export=%.0fW import=%.0fW)", action, export_w, import_w)
-    except Exception as exc:
-        log.warning("auto-charge %s failed: %s", action, exc)
 
 
 async def collect_once() -> None:

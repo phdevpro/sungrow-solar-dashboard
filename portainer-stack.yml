@@ -20,12 +20,6 @@ services:
       # Shared secret for the home twc-agent (Tesla Wall Connector push);
       # leave empty if you don't use the agent.
       EV_INGEST_TOKEN: ${EV_INGEST_TOKEN}
-      # Renault (MyRenault) account for car SOC and charge control;
-      # leave empty to disable the car card.
-      RENAULT_EMAIL: ${RENAULT_EMAIL}
-      RENAULT_PASSWORD: ${RENAULT_PASSWORD}
-      # Solar-surplus auto charging: "1" to start enabled (UI can toggle).
-      EV_AUTO: "0"
     volumes:
       - solar_data:/data
     networks:

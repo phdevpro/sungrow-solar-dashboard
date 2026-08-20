@@ -25,18 +25,6 @@ class Settings:
     # Connector data to /api/ev/ingest. Ingest is disabled when unset.
     ev_ingest_token: str = os.getenv("EV_INGEST_TOKEN", "")
 
-    # Renault (MyRenault) account for car status and charge control.
-    renault_email: str = os.getenv("RENAULT_EMAIL", "")
-    renault_password: str = os.getenv("RENAULT_PASSWORD", "")
-    renault_vin: str = os.getenv("RENAULT_VIN", "")
-    renault_locale: str = os.getenv("RENAULT_LOCALE", "it_IT")
-
-    # Solar-surplus charging automation (default off). When on, the
-    # collector resumes/pauses the car based on grid export/import.
-    ev_auto: bool = os.getenv("EV_AUTO", "0").lower() in ("1", "true", "yes")
-    ev_auto_resume_w: float = float(os.getenv("EV_AUTO_RESUME_W", "1500"))
-    ev_auto_pause_w: float = float(os.getenv("EV_AUTO_PAUSE_W", "800"))
-
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")
     dash_password: str = os.getenv("DASH_PASSWORD", "")
