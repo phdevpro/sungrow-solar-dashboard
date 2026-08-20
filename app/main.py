@@ -524,7 +524,7 @@ async def miele_devices():
         raise HTTPException(status_code=404, detail="Miele app not configured")
     if not miele.connected():
         return {"connected": False, "devices": [], "auto": collector.miele_auto["enabled"]}
-    cached = cache_get("miele", 60)
+    cached = cache_get("miele", 15)
     if cached is not None:
         return cached
     try:
