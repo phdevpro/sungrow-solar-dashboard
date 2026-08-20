@@ -110,6 +110,7 @@ async def get_devices() -> list[dict[str, Any]]:
         state = d.get("state", {})
         ident = d.get("ident", {})
         remote = state.get("remoteEnable", {})
+        remote_ok = bool(remote.get("fullRemoteControl") or remote.get("mobileStart"))
         remaining = state.get("remainingTime") or [0, 0]
         status_code = state.get("status", {}).get("value_raw")
         out.append({
@@ -124,9 +125,10 @@ async def get_devices() -> list[dict[str, Any]]:
             "program": state.get("ProgramID", {}).get("value_localized"),
             "phase": state.get("programPhase", {}).get("value_localized"),
             "remaining_min": remaining[0] * 60 + remaining[1],
-            "remote_start": bool(remote.get("fullRemoteControl")),
+            "remote_start": remote_ok,
             # Startable: programmed and waiting for (remote) start.
-            "startable": status_code in (3, 4) and bool(remote.get("fullRemoteControl")),
+            "startable": status_code in (3, 4) and remote_ok,
+            "remote_raw": remote,
         })
     return out
 
