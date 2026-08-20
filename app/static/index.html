@@ -548,10 +548,10 @@ function renderPanels(container, sub, data, strMap) {
   });
 
   container.innerHTML = `
-    <div class="deduced-note">Raggruppamento per stringa <b>dedotto</b> dalla correlazione
-      delle curve di potenza dei pannelli con i due ingressi MPPT dell'inverter
-      (dati del ${strMap.date?.slice(6)}/${strMap.date?.slice(4, 6)}) — l'API non espone il cablaggio reale.
-      I pannelli marcati "≈" hanno bassa confidenza.</div>
+    <div class="deduced-note">String grouping is <b>deduced</b> by correlating each
+      panel's power curve with the inverter's two MPPT inputs
+      (data from ${strMap.date?.slice(6)}/${strMap.date?.slice(4, 6)}) — the API does not expose the actual wiring.
+      Panels marked "≈" have low confidence. Recomputed daily.</div>
     ${groups.filter(g => g.panels.length).map(g => `
       <div class="string-group">
         <div class="string-head">${g.label}
