@@ -38,6 +38,12 @@ class Settings:
     # (fraction, 0.2 = 20%).
     miele_auto_min_soc: float = float(os.getenv("MIELE_AUTO_MIN_SOC", "0.2"))
 
+    # eWeLink / Sonoff (dev.ewelink.cc OAuth app). Redirect URI to register:
+    # https://<your-dashboard>/api/ewelink/callback
+    ewelink_client_id: str = os.getenv("EWELINK_CLIENT_ID", "")
+    ewelink_client_secret: str = os.getenv("EWELINK_CLIENT_SECRET", "")
+    ewelink_region: str = os.getenv("EWELINK_REGION", "eu")  # eu | us | as | cn
+
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")
     dash_password: str = os.getenv("DASH_PASSWORD", "")

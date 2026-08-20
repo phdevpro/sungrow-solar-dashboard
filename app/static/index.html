@@ -195,6 +195,7 @@
     padding: 0.45rem 0.95rem; border: 0; border-radius: 8px; font: inherit;
     font-size: 0.85rem; font-weight: 600; background: var(--series); color: #fff; cursor: pointer;
   }
+  .btn.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--border); }
   .btn:disabled { opacity: 0.4; cursor: default; }
   .auto-toggle { color: var(--ink-2); font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.4rem; }
   .batt-system {
@@ -948,6 +949,59 @@ function renderAppliances(el, data) {
     postJSON("/api/miele/auto", { enabled: toggle.checked }).catch(() => {}));
 }
 
+/* ---------------- Sonoff / eWeLink ---------------- */
+
+function renderSonoff(el, data) {
+  if (!data.connected) {
+    el.innerHTML = `
+      <div class="card">
+        <h3>Smart plugs</h3>
+        <div class="card-body">
+          <a class="btn" href="/api/ewelink/login">Connect eWeLink account</a>
+        </div>
+      </div>`;
+    return;
+  }
+  const devices = data.devices || [];
+  const totalW = devices.reduce((a, d) => a + (d.power_w ?? 0), 0);
+  el.innerHTML = `
+    <div class="card">
+      <h3>Smart plugs
+        <span class="sub">${devices.length} devices${totalW ? ` · ${totalW.toFixed(0)} W measured` : ""}</span>
+      </h3>
+      <div class="card-body">
+        ${devices.length ? devices.map(d => `
+          <div class="appl-row">
+            <div class="appl-info">
+              <div class="name">${d.name}${d.model ? ` · ${d.model}` : ""}</div>
+              <div class="meta">
+                <span class="status${d.online ? "" : " off"}"><span class="dot"></span>${d.online ? "Online" : "Offline"}</span>
+                ${d.power_w != null ? ` · ${d.power_w.toFixed(1)} W` : ""}
+                ${d.voltage != null ? ` · ${d.voltage.toFixed(0)} V` : ""}
+              </div>
+            </div>
+            <button class="btn${d.switch === "on" ? "" : " ghost"}" data-id="${d.id}"
+              data-on="${d.switch === "on" ? "0" : "1"}" data-mc="${d.multi_channel ? "1" : "0"}"
+              ${d.online && d.switch != null ? "" : "disabled"}>
+              ${d.switch === "on" ? "⏻ Turn off" : "⏻ Turn on"}</button>
+          </div>`).join("")
+        : '<div class="muted">No devices found on this eWeLink account.</div>'}
+      </div>
+    </div>`;
+
+  el.querySelectorAll(".btn[data-id]").forEach(btn => btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await postJSON(`/api/ewelink/devices/${btn.dataset.id}/switch`,
+        { on: btn.dataset.on === "1", multi_channel: btn.dataset.mc === "1" });
+      setTimeout(refresh, 1500);
+    } catch (e) {
+      btn.textContent = "Error";
+      btn.title = e.message;
+    }
+  }));
+}
+
 /* ---------------- Devices ---------------- */
 
 async function loadDevices(psId, container) {
@@ -1027,6 +1081,18 @@ async function refresh() {
       loadDevices(p.ps_id, el.querySelector(".devices-slot"));
       first = false;
     }
+    // Sonoff smart plugs (hidden unless the eWeLink app is configured).
+    getJSON("/api/ewelink/devices")
+      .then(data => {
+        let slot = document.getElementById("sonoff-slot");
+        if (!slot) {
+          slot = document.createElement("div");
+          slot.id = "sonoff-slot";
+          app.appendChild(slot);
+        }
+        renderSonoff(slot, data);
+      })
+      .catch(() => {});
     // Miele appliances (hidden unless the Miele app is configured).
     getJSON("/api/miele/devices")
       .then(data => {

@@ -24,6 +24,11 @@ services:
       # Register redirect URI: https://<DASH_DOMAIN>/api/miele/callback
       MIELE_CLIENT_ID: ${MIELE_CLIENT_ID}
       MIELE_CLIENT_SECRET: ${MIELE_CLIENT_SECRET}
+      # eWeLink / Sonoff (dev.ewelink.cc); leave empty to disable.
+      # Register redirect URI: https://<DASH_DOMAIN>/api/ewelink/callback
+      EWELINK_CLIENT_ID: ${EWELINK_CLIENT_ID}
+      EWELINK_CLIENT_SECRET: ${EWELINK_CLIENT_SECRET}
+      EWELINK_REGION: eu
     volumes:
       - solar_data:/data
     networks:

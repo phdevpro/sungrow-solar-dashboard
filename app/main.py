@@ -10,7 +10,7 @@ import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import auth, collector, miele, storage, strings, wallconnector
+from . import auth, collector, ewelink, miele, storage, strings, wallconnector
 from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
@@ -484,6 +484,77 @@ async def ev_status():
         except Exception as exc:
             raise HTTPException(status_code=502, detail=f"Wall Connector: {exc}")
     raise HTTPException(status_code=404, detail="No EV data")
+
+
+# ---- eWeLink / Sonoff ------------------------------------------------------
+
+
+def _ewelink_redirect_uri(request: Request) -> str:
+    scheme = "https" if _is_https(request) else "http"
+    return f"{scheme}://{request.url.netloc}/api/ewelink/callback"
+
+
+@app.get("/api/ewelink/login")
+async def ewelink_login(request: Request):
+    if not ewelink.enabled():
+        raise HTTPException(status_code=404, detail="eWeLink app not configured")
+    import secrets
+    state = secrets.token_urlsafe(16)
+    storage.kv_put("ewelink_oauth_state", state)
+    return RedirectResponse(ewelink.auth_url(_ewelink_redirect_uri(request), state))
+
+
+@app.get("/api/ewelink/callback")
+async def ewelink_callback(request: Request, code: str = "", state: str = ""):
+    if not ewelink.enabled():
+        raise HTTPException(status_code=404, detail="eWeLink app not configured")
+    import hmac as _hmac
+    expected = storage.kv_get("ewelink_oauth_state") or ""
+    if not code or not expected or not _hmac.compare_digest(state, expected):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    try:
+        await ewelink.exchange_code(code, _ewelink_redirect_uri(request))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"eWeLink token exchange failed: {exc}")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/api/ewelink/devices")
+async def ewelink_devices():
+    if not ewelink.enabled():
+        raise HTTPException(status_code=404, detail="eWeLink app not configured")
+    if not ewelink.connected():
+        return {"connected": False, "devices": []}
+    cached = cache_get("ewelink", 15)
+    if cached is not None:
+        return cached
+    try:
+        devices = await ewelink.get_devices()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"eWeLink API: {exc}")
+    return cache_put("ewelink", {"connected": True, "devices": devices})
+
+
+@app.post("/api/ewelink/devices/{device_id}/switch")
+async def ewelink_switch(device_id: str, request: Request):
+    if not (ewelink.enabled() and ewelink.connected()):
+        raise HTTPException(status_code=404, detail="eWeLink not connected")
+    body = await request.json()
+    try:
+        await ewelink.set_switch(
+            device_id, bool(body.get("on")), bool(body.get("multi_channel"))
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"eWeLink API: {exc}")
+    _response_cache.pop("ewelink", None)
+    return {"ok": True}
+
+
+@app.get("/api/ewelink/devices/{device_id}/history")
+async def ewelink_history(device_id: str, date: str | None = None):
+    date = date or datetime.now().strftime("%Y%m%d")
+    return {"device_id": device_id, "date": date,
+            "samples": storage.load_sonoff_day(device_id, date)}
 
 
 # ---- Miele appliances ------------------------------------------------------
