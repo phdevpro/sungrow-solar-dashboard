@@ -148,7 +148,13 @@ async def get_devices() -> list[dict[str, Any]]:
     data = await _request("GET", "/v2/device/thing", params={"num": 0})
     out = []
     for item in data.get("thingList", []):
+        # itemType 1 = own device, 2 = group, 3 = shared device. Groups have
+        # no deviceid/params of their own, so keep only real devices.
+        if item.get("itemType") not in (1, 3):
+            continue
         d = item.get("itemData", {})
+        if not d.get("deviceid"):
+            continue
         params = d.get("params", {}) or {}
         uiid = (d.get("extra") or {}).get("uiid")
         switch = params.get("switch")
