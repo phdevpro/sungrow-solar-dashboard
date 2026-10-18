@@ -155,10 +155,45 @@ async def _device_state(dev: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def get_devices() -> list[dict[str, Any]]:
-    """Air conditioners on the account with their current state."""
+# Samsung RACs don't push every change to the cloud (e.g. switching off
+# with the IR remote), so SmartThings can keep serving a stale "on" for
+# hours. A `refresh` command makes the unit re-report its real state a
+# few seconds later; throttled so polling stays within command limits.
+REFRESH_EVERY = 90      # seconds between refreshes of the same unit
+REFRESH_SETTLE = 5      # seconds the unit needs to report back
+_last_refresh: dict[str, float] = {}
+_background: set[asyncio.Task] = set()
+
+
+async def _refresh(ids: list[str]) -> None:
+    async def one(dev_id: str) -> None:
+        _last_refresh[dev_id] = time.time()
+        try:
+            await _command(dev_id, "refresh", "refresh")
+        except Exception as exc:
+            log.warning("smartthings: refresh %s failed: %s", dev_id, exc)
+    await asyncio.gather(*(one(i) for i in ids))
+
+
+async def get_devices(fresh: bool = False) -> list[dict[str, Any]]:
+    """Air conditioners on the account with their current state.
+
+    fresh=True (automation decisions): refresh units not refreshed
+    recently and wait for them to report before reading. Otherwise the
+    refresh runs in the background and the next read picks it up.
+    """
     data = await _request("GET", "/devices", params={"capability": "airConditionerMode"})
     items = data.get("items", [])
+    due = [d["deviceId"] for d in items
+           if time.time() - _last_refresh.get(d["deviceId"], 0) > REFRESH_EVERY]
+    if due:
+        if fresh:
+            await _refresh(due)
+            await asyncio.sleep(REFRESH_SETTLE)
+        else:
+            task = asyncio.create_task(_refresh(due))
+            _background.add(task)
+            task.add_done_callback(_background.discard)
     return list(await asyncio.gather(*(_device_state(d) for d in items)))
 
 
@@ -167,7 +202,8 @@ async def _command(device_id: str, capability: str, command: str, args: list | N
     if args:
         cmd["arguments"] = args
     await _request("POST", f"/devices/{device_id}/commands", json={"commands": [cmd]})
-    log.info("smartthings: %s %s %s %s", device_id, capability, command, args or "")
+    if capability != "refresh":
+        log.info("smartthings: %s %s %s %s", device_id, capability, command, args or "")
 
 
 async def set_switch(device_id: str, on: bool) -> None:

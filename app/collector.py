@@ -262,7 +262,7 @@ async def _ac_auto(flow: dict) -> None:
     soc = flow.get("soc")
     ac_auto["deficit_cycles"] = ac_auto["deficit_cycles"] + 1 if deficit > settings.ac_auto_stop_w else 0
     try:
-        devices = {d["id"]: d for d in await smartthings.get_devices()}
+        devices = {d["id"]: d for d in await smartthings.get_devices(fresh=True)}
         # Forget units that are off now (switched off by hand or by us),
         # or that the user took out of automation.
         still = {i for i in started if devices.get(i, {}).get("switch") == "on"}
@@ -321,7 +321,7 @@ async def collect_once() -> None:
     if smartthings.enabled() and smartthings.connected():
         try:
             storage.store_aircon(time.strftime("%Y%m%d%H%M%S"),
-                                 await smartthings.get_devices())
+                                 await smartthings.get_devices(fresh=True))
         except Exception as exc:
             log.warning("aircon snapshot failed: %s", exc)
 
