@@ -203,6 +203,16 @@ def load_aircon_day(device_id: str, date: str) -> list[dict[str, Any]]:
         ]
 
 
+def latest_battery_voltage() -> float | None:
+    """Mean pack voltage from the most recent battery snapshot."""
+    with _lock:
+        row = connect().execute(
+            "SELECT AVG(voltage) FROM battery_samples "
+            "WHERE ts = (SELECT MAX(ts) FROM battery_samples) AND voltage > 0"
+        ).fetchone()
+        return row[0] if row and row[0] else None
+
+
 def get_setting(key: str, default: str | None = None) -> str | None:
     with _lock:
         row = connect().execute(

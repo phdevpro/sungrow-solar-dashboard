@@ -1158,6 +1158,7 @@ function renderAircon(el, data) {
             d.temp_c != null ? `room ${d.temp_c.toFixed(1)} °C` : "",
             d.humidity != null ? `${d.humidity.toFixed(0)}% RH` : "",
             on && d.power_w != null ? `${d.power_w.toFixed(0)} W` : "",
+            d.priority ? `surplus priority ${d.priority}` : "",
             d.auto_started ? "started by solar surplus" : "",
           ].filter(Boolean).join(" · ");
           return `
@@ -1165,16 +1166,15 @@ function renderAircon(el, data) {
             <div class="appl-info">
               <div class="name">${esc(d.name)}</div>
               <div class="meta">${meta}</div>
-              <label class="auto-toggle"><input type="checkbox" class="ac-dev-auto" ${d.auto ? "checked" : ""}> Use for solar surplus</label>
             </div>
             <div class="ac-ctrl">
               <select class="ac-mode" ${dis} aria-label="Mode">
                 ${(d.modes.length ? d.modes : [d.mode]).filter(Boolean).map(m =>
                   `<option value="${esc(m)}" ${m === d.mode ? "selected" : ""}>${esc(AC_MODES[m] || m)}</option>`).join("")}
               </select>
-              <button class="btn ghost step" data-step="-0.5" ${dis} aria-label="Lower setpoint">−</button>
-              <span class="sp">${d.setpoint_c != null ? d.setpoint_c.toFixed(1) + "°" : "—"}</span>
-              <button class="btn ghost step" data-step="0.5" ${dis} aria-label="Raise setpoint">+</button>
+              <button class="btn ghost step" data-step="-1" ${dis} aria-label="Lower setpoint">−</button>
+              <span class="sp">${d.setpoint_c != null ? Math.round(d.setpoint_c) + "°" : "—"}</span>
+              <button class="btn ghost step" data-step="1" ${dis} aria-label="Raise setpoint">+</button>
               <button class="btn${on ? "" : " ghost"} ac-power" ${dis}>${on ? "⏻ Turn off" : "⏻ Turn on"}</button>
             </div>
           </div>`;
@@ -1202,8 +1202,9 @@ function renderAircon(el, data) {
       send(row, { mode: e.currentTarget.value }, e.currentTarget));
     row.querySelectorAll(".step").forEach(b => b.addEventListener("click", () => {
       if (d.setpoint_c == null) return;
-      d.setpoint_c = Math.min(30, Math.max(16, d.setpoint_c + Number(b.dataset.step)));
-      row.querySelector(".sp").textContent = d.setpoint_c.toFixed(1) + "°";
+      // Whole degrees only: the units reject decimal setpoints.
+      d.setpoint_c = Math.min(30, Math.max(16, Math.round(d.setpoint_c) + Number(b.dataset.step)));
+      row.querySelector(".sp").textContent = d.setpoint_c + "°";
       // Debounce: send once the user stops tapping.
       clearTimeout(row._spTimer);
       el.dataset.hold = "1";
@@ -1212,8 +1213,6 @@ function renderAircon(el, data) {
         send(row, { setpoint: d.setpoint_c }, b);
       }, 800);
     }));
-    row.querySelector(".ac-dev-auto").addEventListener("change", e =>
-      postJSON("/api/aircon-auto", { device_id: d.id, device_on: e.currentTarget.checked }).catch(() => {}));
   });
 }
 
@@ -1289,30 +1288,75 @@ function renderHomeSummary() {
 
 function renderAutomations() {
   const card = document.getElementById("card-auto");
-  const items = [];
   const ac = home.aircon, mi = home.miele;
-  if (ac?.connected) items.push({
-    key: "ac", on: ac.auto, title: "Air conditioning",
-    text: `Switch on a unit marked “Use for solar surplus” above ${(ac.surplus_w / 1000).toFixed(1)} kW export with battery ≥ ${Math.round(ac.min_soc * 100)}%. Switch it off after 10 min drawing more than ${ac.stop_w} W from battery or grid.`,
-  });
+  const kw = w => (w / 1000).toFixed(1) + " kW";
+  const items = [];
   if (mi?.connected) items.push({
-    key: "miele", on: mi.auto, title: "Miele appliances",
-    text: `Start a programmed appliance above ${(mi.surplus_w / 1000).toFixed(1)} kW export with battery ≥ ${Math.round((mi.min_soc ?? 0) * 100)}%.`,
+    key: "miele", on: mi.auto, title: "1 · Miele appliances",
+    text: `Start a programmed appliance when more than ${kw(mi.surplus_w)} is being exported${mi.min_soc ? ` and battery ≥ ${Math.round(mi.min_soc * 100)}%` : ""}.`,
+  });
+  if (ac?.connected) items.push({
+    key: "ac", on: ac.auto, title: `${mi?.connected ? "2" : "1"} · Air conditioning`,
+    text: `When more than ${kw(ac.surplus_w)} is being exported, switch on the next unit in the order below (one every 10 min). Switch off the lowest-priority unit it started once the ACs take more than ${ac.stop_w} W the battery could absorb (it charges up to ~${kw(ac.batt_max_w)}) or that comes from grid/battery, for 10 min.`,
+    units: true,
   });
   card.hidden = !items.length;
   const slot = card.querySelector(".auto-slot");
-  if (slot.contains(document.activeElement)) return;
+  if (slot.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+
+  // Opted-in units first in priority order, then the others.
+  const order = ac?.order || [];
+  const units = ac?.connected ? [
+    ...order.map(id => ac.devices.find(d => d.id === id)).filter(Boolean),
+    ...ac.devices.filter(d => !order.includes(d.id)),
+  ] : [];
+  const unitList = () => `<div style="margin-top:0.6rem">${units.map(d => {
+    const n = order.indexOf(d.id);
+    return `<div class="sum-row" style="align-items:center" data-unit="${esc(d.id)}">
+      <label style="display:inline-flex;gap:0.5rem;align-items:center;cursor:pointer">
+        <input type="checkbox" data-use ${n >= 0 ? "checked" : ""} style="width:18px;height:18px">
+        <span>${n >= 0 ? `<b style="display:inline;color:var(--ink)">${n + 1}.</b> ` : ""}${esc(d.name)}</span>
+      </label>
+      <span style="display:inline-flex;gap:0.3rem">${n >= 0 ? `
+        <button class="btn ghost step" data-move="-1" ${n === 0 ? "disabled" : ""} aria-label="Higher priority">▲</button>
+        <button class="btn ghost step" data-move="1" ${n === order.length - 1 ? "disabled" : ""} aria-label="Lower priority">▼</button>` : `<span class="muted">not used</span>`}
+      </span>
+    </div>`;
+  }).join("")}</div>`;
+
   slot.innerHTML = `<div class="attn">${items.map(i => `
-    <label class="attn-item info" style="display:flex;gap:0.7rem;align-items:flex-start;cursor:pointer">
-      <input type="checkbox" data-auto="${i.key}" ${i.on ? "checked" : ""} style="width:18px;height:18px;margin:0.1rem 0 0">
-      <span><b>${i.title}</b><span class="muted">${esc(i.text)}</span></span>
-    </label>`).join("")}</div>`;
+    <div class="attn-item info">
+      <label style="display:flex;gap:0.7rem;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" data-auto="${i.key}" ${i.on ? "checked" : ""} style="width:18px;height:18px;margin:0.1rem 0 0">
+        <span><b>${i.title}</b><span class="muted">${esc(i.text)}</span></span>
+      </label>
+      ${i.units ? unitList() : ""}
+    </div>`).join("")}</div>`;
+
   slot.querySelectorAll("input[data-auto]").forEach(cb => cb.addEventListener("change", () => {
     const url = cb.dataset.auto === "ac" ? "/api/aircon-auto" : "/api/miele/auto";
     postJSON(url, { enabled: cb.checked })
       .then(() => bump(cb.dataset.auto === "ac" ? "aircon" : "miele"))
       .catch(e => { cb.checked = !cb.checked; alert(e.message); });
   }));
+  const saveOrder = next => {
+    ac.order = next;  // optimistic, so the list redraws at once
+    renderAutomations();
+    postJSON("/api/aircon-auto", { order: next })
+      .then(() => bump("aircon"))
+      .catch(e => { alert(e.message); bump("aircon"); });
+  };
+  slot.querySelectorAll("[data-unit]").forEach(row => {
+    const id = row.dataset.unit;
+    row.querySelector("input[data-use]").addEventListener("change", e =>
+      saveOrder(e.target.checked ? [...order, id] : order.filter(x => x !== id)));
+    row.querySelectorAll("[data-move]").forEach(b => b.addEventListener("click", () => {
+      const i = order.indexOf(id), j = i + Number(b.dataset.move);
+      const next = [...order];
+      [next[i], next[j]] = [next[j], next[i]];
+      saveOrder(next);
+    }));
+  });
 }
 
 const lastPanels = { data: null };

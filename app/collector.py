@@ -28,10 +28,10 @@ def set_miele_auto(enabled: bool) -> None:
     storage.set_setting("miele_auto", "1" if enabled else "0")
 
 
-# Solar-surplus air conditioning. Opt-in per unit; only units the
-# automation switched on are ever switched off by it, so manual use is
-# never overridden. State lives in settings/kv to survive restarts.
-ac_auto = {"enabled": False, "devices": set(), "last_action_ts": 0.0, "deficit_cycles": 0}
+# Solar-surplus air conditioning. Opt-in per unit, in priority order;
+# only units the automation switched on are ever switched off by it, so
+# manual use is never overridden. State lives in settings/kv.
+ac_auto = {"enabled": False, "devices": [], "last_action_ts": 0.0, "deficit_cycles": 0}
 AC_COOLDOWN = 600       # min seconds between AC actions (compressor protection)
 AC_STOP_CYCLES = 2      # consecutive deficit cycles before switching off
 AC_STARTED_KEY = "ac_auto_started"
@@ -39,11 +39,11 @@ AC_STARTED_KEY = "ac_auto_started"
 
 def load_ac_auto() -> None:
     ac_auto["enabled"] = storage.get_setting("ac_auto") == "1"
-    ac_auto["devices"] = set(json.loads(storage.get_setting("ac_auto_devices") or "[]"))
+    ac_auto["devices"] = list(json.loads(storage.get_setting("ac_auto_devices") or "[]"))
 
 
-def set_ac_auto(enabled: bool | None = None, device_id: str | None = None,
-                device_on: bool | None = None) -> None:
+def set_ac_auto(enabled: bool | None = None, order: list[str] | None = None) -> None:
+    """order: the opted-in unit ids, highest priority first."""
     # Turning automation off (globally or for a unit) hands those units
     # back to manual control as they are: nothing is switched off.
     if enabled is not None:
@@ -51,13 +51,11 @@ def set_ac_auto(enabled: bool | None = None, device_id: str | None = None,
         storage.set_setting("ac_auto", "1" if enabled else "0")
         if not enabled:
             _save_ac_started(set())
-    if device_id is not None:
-        if device_on:
-            ac_auto["devices"].add(device_id)
-        else:
-            ac_auto["devices"].discard(device_id)
-            _save_ac_started(ac_auto_started() - {device_id})
-        storage.set_setting("ac_auto_devices", json.dumps(sorted(ac_auto["devices"])))
+    if order is not None:
+        order = list(dict.fromkeys(str(i) for i in order))
+        _save_ac_started(ac_auto_started() & set(order))
+        ac_auto["devices"] = order
+        storage.set_setting("ac_auto_devices", json.dumps(order))
 
 
 def ac_auto_started() -> set[str]:
@@ -183,8 +181,11 @@ async def _collect_plant(plant: dict) -> None:
             flow = await fetch_flow(inverter["ps_key"])
             if flow:
                 storage.store_flow(ps_id, flow.get("time") or now, flow)
-                await _miele_auto_start(flow)
-                await _ac_auto(flow)
+                # Appliances first (a finite program), then the ACs; the
+                # flow reading is stale after a start, so no AC start
+                # in the same cycle.
+                miele_started = await _miele_auto_start(flow)
+                await _ac_auto(flow, allow_start=not miele_started)
         except ISolarCloudError as exc:
             log.warning("flow snapshot failed for %s: %s", ps_id, exc)
 
@@ -221,50 +222,86 @@ def _f(v):
         return None
 
 
-async def _miele_auto_start(flow: dict) -> None:
-    """Start one appliance waiting for remote start when the grid export
-    exceeds the surplus threshold. One start per cooldown window."""
-    if not (miele_auto["enabled"] and miele.enabled() and miele.connected()):
-        return
-    if time.time() - miele_auto["last_start_ts"] < MIELE_COOLDOWN:
-        return
-    if (flow.get("grid_export_w") or 0) < settings.miele_auto_surplus_w:
-        return
-    # Never drain a low house battery into an appliance start.
+BATT_FULL_SOC = 0.97    # above this the battery tapers: no charge headroom
+EXPORT_IDLE_W = 100     # export below this = nothing left over
+
+
+def batt_max_charge_w() -> float:
+    if settings.batt_max_charge_w:
+        return settings.batt_max_charge_w
+    volts = storage.latest_battery_voltage()
+    return settings.batt_max_charge_a * (volts or 105.0)
+
+
+def surplus(flow: dict) -> dict:
+    """Where the PV power that loads could use is going right now.
+
+    export: sold to the grid — real surplus, because the battery only lets
+    power through to the grid once it is full or charging at its limit.
+    deficit: power a load is taking that should not go to it: grid import,
+    battery discharge, and charge headroom (the battery could absorb more).
+    """
+    export = flow.get("grid_export_w") or 0
+    chg = flow.get("batt_charge_w") or 0
     soc = flow.get("soc")
-    if soc is None or soc < settings.miele_auto_min_soc:
-        return
+    headroom = 0.0
+    if soc is not None and soc < BATT_FULL_SOC:
+        headroom = max(0.0, batt_max_charge_w() - chg)
+    deficit = (flow.get("grid_import_w") or 0) + (flow.get("batt_discharge_w") or 0) + headroom
+    return {"export": export, "deficit": deficit, "headroom": headroom, "soc": soc}
+
+
+async def _miele_auto_start(flow: dict) -> bool:
+    """Start one appliance waiting for remote start when the grid export
+    exceeds the surplus threshold. One start per cooldown window.
+    Returns True when an appliance was started."""
+    if not (miele_auto["enabled"] and miele.enabled() and miele.connected()):
+        return False
+    if time.time() - miele_auto["last_start_ts"] < MIELE_COOLDOWN:
+        return False
+    if (flow.get("grid_export_w") or 0) < settings.miele_auto_surplus_w:
+        return False
+    soc = flow.get("soc")
+    if settings.miele_auto_min_soc and (soc is None or soc < settings.miele_auto_min_soc):
+        return False
     try:
         devices = await miele.get_devices()
         candidate = next((d for d in devices if d["startable"]), None)
         if candidate is None:
-            return
+            return False
         await miele.start(candidate["id"])
         miele_auto["last_start_ts"] = time.time()
         log.info(
             "miele auto-start: %s (%s) at export %.0f W",
             candidate["name"], candidate["type"], flow.get("grid_export_w") or 0,
         )
+        return True
     except Exception as exc:
         log.warning("miele auto-start failed: %s", exc)
+        return False
 
 
-async def _ac_auto(flow: dict) -> None:
-    """Switch on one opted-in AC on solar surplus; switch off the units
-    it started when the house runs on battery/grid for a sustained time."""
+async def _ac_auto(flow: dict, allow_start: bool = True) -> None:
+    """Use exported power for air conditioning, one unit at a time.
+
+    Start: export above the threshold → switch on the highest-priority
+    opted-in unit that is off. Stop: a unit the automation started now
+    takes power the battery could absorb or that comes from grid/battery
+    (deficit) for AC_STOP_CYCLES cycles → switch off the lowest-priority
+    started unit. One action per AC_COOLDOWN.
+    """
     if not (smartthings.enabled() and smartthings.connected()):
         return
     if not (ac_auto["enabled"] and ac_auto["devices"]):
         return
+    order = ac_auto["devices"]
     started = ac_auto_started()
-    export = flow.get("grid_export_w") or 0
-    deficit = (flow.get("grid_import_w") or 0) + (flow.get("batt_discharge_w") or 0)
-    soc = flow.get("soc")
-    ac_auto["deficit_cycles"] = ac_auto["deficit_cycles"] + 1 if deficit > settings.ac_auto_stop_w else 0
+    sp = surplus(flow)
+    stealing = sp["export"] < EXPORT_IDLE_W and sp["deficit"] > settings.ac_auto_stop_w
+    ac_auto["deficit_cycles"] = ac_auto["deficit_cycles"] + 1 if stealing else 0
     try:
         devices = {d["id"]: d for d in await smartthings.get_devices(fresh=True)}
-        # Forget units that are off now (switched off by hand or by us),
-        # or that the user took out of automation.
+        # Forget units that are off now (switched off by hand or by us).
         still = {i for i in started if devices.get(i, {}).get("switch") == "on"}
         if still != started:
             started = still
@@ -272,21 +309,24 @@ async def _ac_auto(flow: dict) -> None:
         if time.time() - ac_auto["last_action_ts"] < AC_COOLDOWN:
             return
 
-        low_soc = soc is not None and soc < settings.ac_auto_min_soc
+        soc = sp["soc"]
+        low_soc = bool(settings.ac_auto_min_soc) and (soc is None or soc < settings.ac_auto_min_soc)
         if started and (ac_auto["deficit_cycles"] >= AC_STOP_CYCLES or low_soc):
-            dev_id = sorted(started)[0]
+            rank = {i: n for n, i in enumerate(order)}
+            dev_id = max(started, key=lambda i: rank.get(i, len(order)))
             await smartthings.set_switch(dev_id, False)
             started.discard(dev_id)
             _save_ac_started(started)
             ac_auto["last_action_ts"] = time.time()
-            log.info("ac auto-stop: %s (deficit %.0f W, soc %s)",
-                     devices[dev_id]["name"], deficit, soc)
+            ac_auto["deficit_cycles"] = 0
+            log.info("ac auto-stop: %s (deficit %.0f W, headroom %.0f W, soc %s)",
+                     devices.get(dev_id, {}).get("name", dev_id), sp["deficit"], sp["headroom"], soc)
             return
 
-        if export < settings.ac_auto_surplus_w or soc is None or low_soc:
+        if not allow_start or low_soc or sp["export"] < settings.ac_auto_surplus_w:
             return
-        candidate = next((d for i, d in devices.items()
-                          if i in ac_auto["devices"] and d["online"] and d["switch"] == "off"),
+        candidate = next((devices[i] for i in order
+                          if i in devices and devices[i]["online"] and devices[i]["switch"] == "off"),
                          None)
         if candidate is None:
             return
@@ -295,8 +335,8 @@ async def _ac_auto(flow: dict) -> None:
         _save_ac_started(started)
         ac_auto["last_action_ts"] = time.time()
         ac_auto["deficit_cycles"] = 0
-        log.info("ac auto-start: %s (%s) at export %.0f W",
-                 candidate["name"], candidate["mode"], export)
+        log.info("ac auto-start: %s (priority %d, %s) at export %.0f W",
+                 candidate["name"], order.index(candidate["id"]) + 1, candidate["mode"], sp["export"])
     except Exception as exc:
         log.warning("ac auto failed: %s", exc)
 

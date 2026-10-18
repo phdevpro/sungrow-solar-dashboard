@@ -34,9 +34,10 @@ class Settings:
     # exceeds this threshold (default off; UI can toggle).
     miele_auto: bool = os.getenv("MIELE_AUTO", "0").lower() in ("1", "true", "yes")
     miele_auto_surplus_w: float = float(os.getenv("MIELE_AUTO_SURPLUS_W", "1000"))
-    # Don't auto-start unless the house battery is at least this charged
-    # (fraction, 0.2 = 20%).
-    miele_auto_min_soc: float = float(os.getenv("MIELE_AUTO_MIN_SOC", "0.2"))
+    # Optional floor: don't auto-start below this battery charge (fraction).
+    # Default 0: export only happens when the battery can't take more
+    # (full, or charging at its current limit), so exporting is the signal.
+    miele_auto_min_soc: float = float(os.getenv("MIELE_AUTO_MIN_SOC", "0"))
 
     # eWeLink / Sonoff (dev.ewelink.cc OAuth app). Redirect URI to register:
     # https://<your-dashboard>/api/ewelink/callback
@@ -49,13 +50,21 @@ class Settings:
     # https://<your-dashboard>/api/smartthings/callback
     smartthings_client_id: str = os.getenv("SMARTTHINGS_CLIENT_ID", "")
     smartthings_client_secret: str = os.getenv("SMARTTHINGS_CLIENT_SECRET", "")
-    # Solar-surplus AC: switch on one opted-in unit when grid export
-    # exceeds AC_AUTO_SURPLUS_W and the battery is at least AC_AUTO_MIN_SOC;
-    # switch off units it started once the house draws more than
-    # AC_AUTO_STOP_W from battery + grid for two cycles in a row.
-    ac_auto_surplus_w: float = float(os.getenv("AC_AUTO_SURPLUS_W", "1500"))
-    ac_auto_min_soc: float = float(os.getenv("AC_AUTO_MIN_SOC", "0.5"))
+    # Solar-surplus AC: switch on opted-in units one at a time, in
+    # priority order, while grid export exceeds AC_AUTO_SURPLUS_W; switch
+    # them off (lowest priority first) once they eat more than
+    # AC_AUTO_STOP_W of power the battery could have taken, or that comes
+    # from grid/battery, for two cycles in a row.
+    ac_auto_surplus_w: float = float(os.getenv("AC_AUTO_SURPLUS_W", "1000"))
+    ac_auto_min_soc: float = float(os.getenv("AC_AUTO_MIN_SOC", "0"))
     ac_auto_stop_w: float = float(os.getenv("AC_AUTO_STOP_W", "500"))
+
+    # Battery charge current limit. Above it the surplus is exported even
+    # with a low battery, so the automations use it to tell real surplus
+    # (battery saturated) from power the battery could still absorb.
+    # Max charge W = this × measured pack voltage (BATT_MAX_CHARGE_W overrides).
+    batt_max_charge_a: float = float(os.getenv("BATT_MAX_CHARGE_A", "30"))
+    batt_max_charge_w: float = float(os.getenv("BATT_MAX_CHARGE_W", "0"))
 
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")

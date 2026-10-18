@@ -215,5 +215,6 @@ async def set_mode(device_id: str, mode: str) -> None:
 
 
 async def set_setpoint(device_id: str, celsius: float) -> None:
-    # Samsung ACs use the cooling setpoint as the target in every mode.
-    await _command(device_id, "thermostatCoolingSetpoint", "setCoolingSetpoint", [celsius])
+    # Samsung ACs use the cooling setpoint as the target in every mode,
+    # and only accept whole degrees.
+    await _command(device_id, "thermostatCoolingSetpoint", "setCoolingSetpoint", [int(round(celsius))])

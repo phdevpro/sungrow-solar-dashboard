@@ -158,8 +158,9 @@ async def icon(name: str):
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return INDEX_HTML
+async def index():
+    # Revalidate every load, so a new deploy shows up without a hard refresh.
+    return HTMLResponse(INDEX_HTML, headers={"Cache-Control": "no-cache"})
 
 
 def _api_error(exc: ISolarCloudError) -> HTTPException:
@@ -614,28 +615,33 @@ async def aircon_devices():
             return {"connected": False, "devices": []}
         raise HTTPException(status_code=502, detail=f"SmartThings API: {exc}")
     started = collector.ac_auto_started()
+    order = collector.ac_auto["devices"]
     for d in devices:
-        d["auto"] = d["id"] in collector.ac_auto["devices"]
+        d["auto"] = d["id"] in order
+        d["priority"] = order.index(d["id"]) + 1 if d["id"] in order else None
         d["auto_started"] = d["id"] in started
     return cache_put("aircon", {
         "connected": True, "devices": devices,
         "auto": collector.ac_auto["enabled"],
+        "order": order,
         "surplus_w": settings.ac_auto_surplus_w,
         "min_soc": settings.ac_auto_min_soc,
         "stop_w": settings.ac_auto_stop_w,
+        "batt_max_w": round(collector.batt_max_charge_w()),
     })
 
 
 @app.post("/api/aircon/{device_id}")
 async def aircon_command(device_id: str, request: Request):
-    """Body: any of {"on": bool, "mode": str, "setpoint": float}."""
+    """Body: any of {"on": bool, "mode": str, "setpoint": int}."""
     _require_smartthings()
     body = await request.json()
     try:
         if "mode" in body:
             await smartthings.set_mode(device_id, str(body["mode"]))
         if "setpoint" in body:
-            sp = float(body["setpoint"])
+            # Whole degrees: the units reject decimal setpoints.
+            sp = round(float(body["setpoint"]))
             if not 16 <= sp <= 30:
                 raise HTTPException(status_code=400, detail="Setpoint must be 16-30 °C")
             await smartthings.set_setpoint(device_id, sp)
@@ -649,17 +655,19 @@ async def aircon_command(device_id: str, request: Request):
 
 @app.post("/api/aircon-auto")
 async def aircon_auto(request: Request):
-    """Body: {"enabled": bool} and/or {"device_id": str, "device_on": bool}."""
+    """Body: {"enabled": bool} and/or {"order": [device ids, highest priority first]}."""
     body = await request.json()
+    order = body.get("order")
+    if order is not None and not (isinstance(order, list) and all(isinstance(i, str) for i in order)):
+        raise HTTPException(status_code=400, detail="order must be a list of device ids")
     collector.set_ac_auto(
         enabled=bool(body["enabled"]) if "enabled" in body else None,
-        device_id=body.get("device_id"),
-        device_on=bool(body.get("device_on")),
+        order=order,
     )
-    log.info("ac solar-surplus auto: %s devices=%s",
-             collector.ac_auto["enabled"], sorted(collector.ac_auto["devices"]))
+    log.info("ac solar-surplus auto: %s order=%s",
+             collector.ac_auto["enabled"], collector.ac_auto["devices"])
     _response_cache.pop("aircon", None)
-    return {"auto": collector.ac_auto["enabled"]}
+    return {"auto": collector.ac_auto["enabled"], "order": collector.ac_auto["devices"]}
 
 
 @app.get("/api/aircon/{device_id}/history")
@@ -720,6 +728,7 @@ async def miele_devices():
         "auto": collector.miele_auto["enabled"],
         "surplus_w": settings.miele_auto_surplus_w,
         "min_soc": settings.miele_auto_min_soc,
+        "batt_max_w": round(collector.batt_max_charge_w()),
     })
 
 
