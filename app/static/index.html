@@ -143,10 +143,13 @@
 
   /* Energy flow */
   .flow-today {
-    display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; margin-top: 0.6rem;
-    color: var(--muted); font-size: 0.78rem;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 0.5rem 1rem;
+    margin-top: 0.6rem; padding-top: 0.7rem; border-top: 1px solid var(--hairline);
   }
-  .flow-today b { color: var(--ink-2); font-weight: 600; }
+  .flow-today span { display: block; color: var(--muted); font-size: 0.75rem; }
+  .flow-today b { display: block; color: var(--ink); font-weight: 600; font-size: 0.95rem; }
+  .flow-svg { display: block; width: 100%; height: auto; max-width: 720px; margin: 0 auto; }
+  .chart-wrap svg.flow-svg.portrait { max-width: 440px; }
 
   /* Panel grid */
   .panel-grid {
@@ -285,6 +288,31 @@
   header.page .live { display: inline-flex; align-items: center; gap: 0.4rem; }
   header.page .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
   header.page .live.paused .dot, header.page .live.late .dot { background: var(--accent); }
+
+  /* Phone: use the width. Tighter gutters and card padding, one
+     scrolling row of tabs, compact header. */
+  @media (max-width: 600px) {
+    body { font-size: 15px; }
+    .wrap { padding: 0.9rem 0.75rem 1.5rem; }
+    header.page { margin-bottom: 0.75rem; gap: 0.4rem; }
+    header.page h1 { font-size: 1.1rem; }
+    .head-right { flex-wrap: wrap; gap: 0.3rem 0.8rem; }
+    .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 0.75rem; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tabs button { flex: none; min-height: 44px; padding: 0 0.85rem; }
+    section > * + * { margin-top: 0.75rem; }
+    .cols { gap: 0.75rem; }
+    .cols > .col { gap: 0.75rem; }
+    .card { margin-top: 0.75rem; border-radius: 12px; }
+    .card > h3 { padding: 0.65rem 0.75rem; font-size: 0.9rem; }
+    .card-body { padding: 0.75rem; }
+    .tile { padding: 0.75rem 0.85rem; }
+    .tile .label { font-size: 0.78rem; }
+    .chart-controls { padding: 0.5rem 0.75rem; }
+    .flow-today { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    th, td { padding: 0.5rem 0.75rem; }
+    .pad { padding: 0.75rem; }
+  }
 
   .error {
     background: var(--surface); border: 1px solid var(--border); border-left: 3px solid #d03b3b;
@@ -822,21 +850,30 @@ function renderFlow(container, sub, f, ev) {
   const battToGrid = Math.max(exp - pvToGrid, 0);
 
   // Diamond layout: solar top, grid left, home right, battery bottom;
-  // EV hangs below Home when the wall connector reports charging.
-  // All paths are quarter-curves that meet smoothly around the center.
-  const S = { x: 350, y: 62 }, G = { x: 96, y: 185 }, H = { x: 604, y: 185 }, B = { x: 350, y: 308 };
-  const EV = { x: 604, y: 330 };
+  // EV below Home when a wall connector reports. All paths are
+  // quarter-curves meeting at the center. Narrow cards (phones) get a
+  // portrait geometry drawn near 1:1, so the text stays readable instead
+  // of the wide drawing being shrunk to ~40%.
+  const portrait = container.clientWidth > 0 && container.clientWidth < 520;
+  container.dataset.portrait = portrait ? "1" : "";
+  const L = portrait
+    ? { W: 336, H: 430, r: 40, S: { x: 168, y: 66 }, G: { x: 52, y: 200 }, H_: { x: 284, y: 200 },
+        B: { x: 168, y: 346 }, EV: { x: 284, y: 346 }, val: 15, lab: 13, sub: 12, ico: 20, dot: 5, stroke: 2.5 }
+    : { W: 700, H: ev ? 420 : 400, r: 38, S: { x: 350, y: 62 }, G: { x: 96, y: 185 }, H_: { x: 604, y: 185 },
+        B: { x: 350, y: 308 }, EV: { x: 604, y: 330 }, val: 12.5, lab: 11.5, sub: 10.5, ico: 20, dot: 4.5, stroke: 2 };
+  const { S, G, B, EV } = L, H = L.H_, gap = L.r + 6, my = G.y;
   const CLR = { sun: "#eda100", batt: "#2a9d5c", grid: "#9085e9", home: "#3987e5", ev: "#e34948" };
 
+  const sTop = S.y + gap, bTop = B.y - gap, gR = G.x + gap, hL = H.x - gap;
   const flows = [
-    ...(ev ? [{ w: evOn ? ev.power_w : 0, path: `M ${H.x} ${H.y + 44} L ${EV.x} ${EV.y - 44}`, color: CLR.ev }] : []),
-    { w: pvToLoad,   path: `M ${S.x} ${S.y + 38} C ${S.x} 185, ${S.x} 185, ${H.x - 44} 185`, color: CLR.sun },
-    { w: pvToBatt,   path: `M ${S.x} ${S.y + 38} L ${B.x} ${B.y - 44}`,                       color: CLR.sun },
-    { w: pvToGrid,   path: `M ${S.x} ${S.y + 38} C ${S.x} 185, ${S.x} 185, ${G.x + 44} 185`, color: CLR.sun },
-    { w: battToLoad, path: `M ${B.x} ${B.y - 44} C ${B.x} 185, ${B.x} 185, ${H.x - 44} 185`, color: CLR.batt },
-    { w: battToGrid, path: `M ${B.x} ${B.y - 44} C ${B.x} 185, ${B.x} 185, ${G.x + 44} 185`, color: CLR.batt },
-    { w: gridToLoad, path: `M ${G.x + 44} 185 L ${H.x - 44} 185`,                             color: CLR.grid },
-    { w: gridToBatt, path: `M ${G.x + 44} 185 C ${B.x} 185, ${B.x} 185, ${B.x} ${B.y - 44}`, color: CLR.grid },
+    ...(ev ? [{ w: evOn ? ev.power_w : 0, path: `M ${H.x} ${H.y + gap} L ${EV.x} ${EV.y - gap}`, color: CLR.ev }] : []),
+    { w: pvToLoad,   path: `M ${S.x} ${sTop} C ${S.x} ${my}, ${S.x} ${my}, ${hL} ${my}`, color: CLR.sun },
+    { w: pvToBatt,   path: `M ${S.x} ${sTop} L ${B.x} ${bTop}`,                         color: CLR.sun },
+    { w: pvToGrid,   path: `M ${S.x} ${sTop} C ${S.x} ${my}, ${S.x} ${my}, ${gR} ${my}`, color: CLR.sun },
+    { w: battToLoad, path: `M ${B.x} ${bTop} C ${B.x} ${my}, ${B.x} ${my}, ${hL} ${my}`, color: CLR.batt },
+    { w: battToGrid, path: `M ${B.x} ${bTop} C ${B.x} ${my}, ${B.x} ${my}, ${gR} ${my}`, color: CLR.batt },
+    { w: gridToLoad, path: `M ${gR} ${my} L ${hL} ${my}`,                               color: CLR.grid },
+    { w: gridToBatt, path: `M ${gR} ${my} C ${B.x} ${my}, ${B.x} ${my}, ${B.x} ${bTop}`, color: CLR.grid },
   ];
 
   const paths = flows.map((e, i) => {
@@ -844,9 +881,9 @@ function renderFlow(container, sub, f, ev) {
     // Dot speed scales with power: 0.5 kW ≈ 4s per lap, 5 kW ≈ 1.2s.
     const dur = Math.max(1.2, Math.min(5, 2200 / Math.max(e.w, 80))).toFixed(2);
     const base = `<path d="${e.path}" fill="none" stroke="${on ? e.color : "var(--hairline)"}"
-      stroke-width="${on ? 2 : 1.5}" opacity="${on ? 0.55 : 0.6}" stroke-linecap="round"/>`;
+      stroke-width="${on ? L.stroke : 1.5}" opacity="${on ? 0.55 : 0.6}" stroke-linecap="round"/>`;
     if (!on) return base;
-    const dots = [0, 1, 2].map(k => `<circle r="4.5" fill="${e.color}">
+    const dots = [0, 1, 2].map(k => `<circle r="${L.dot}" fill="${e.color}">
       <animateMotion dur="${dur}s" begin="${(-dur * k / 3).toFixed(2)}s" repeatCount="indefinite" path="${e.path}"/>
     </circle>`).join("");
     return base + dots;
@@ -856,20 +893,20 @@ function renderFlow(container, sub, f, ev) {
   const gridState = imp - exp > 15 ? "Importing" : exp - imp > 15 ? "Exporting" : "Standby";
 
   const node = (n, ico, color, value, l1, l2, labelAbove) => `
-    <circle cx="${n.x}" cy="${n.y}" r="38" fill="var(--surface)" stroke="${color}" stroke-width="2.5"/>
-    <text x="${n.x}" y="${n.y - 4}" text-anchor="middle" font-size="20">${ico}</text>
-    <text x="${n.x}" y="${n.y + 20}" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">${value}</text>
+    <circle cx="${n.x}" cy="${n.y}" r="${L.r}" fill="var(--surface)" stroke="${color}" stroke-width="2.5"/>
+    <text x="${n.x}" y="${n.y - 4}" text-anchor="middle" font-size="${L.ico}">${ico}</text>
+    <text x="${n.x}" y="${n.y + L.r * 0.5 + 1}" text-anchor="middle" font-size="${L.val}" font-weight="700" fill="var(--ink)">${value}</text>
     ${labelAbove
-      ? `<text x="${n.x}" y="${n.y - 50}" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink-2)">${l1}</text>`
-      : `<text x="${n.x}" y="${n.y + 58}" text-anchor="middle" font-size="11.5" font-weight="600" fill="var(--ink-2)">${l1}</text>
-         ${l2 ? `<text x="${n.x}" y="${n.y + 73}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${l2}</text>` : ""}`}`;
+      ? `<text x="${n.x}" y="${n.y - L.r - 12}" text-anchor="middle" font-size="${L.lab}" font-weight="600" fill="var(--ink-2)">${l1}</text>`
+      : `<text x="${n.x}" y="${n.y + L.r + 20}" text-anchor="middle" font-size="${L.lab}" font-weight="600" fill="var(--ink-2)">${l1}</text>
+         ${l2 ? `<text x="${n.x}" y="${n.y + L.r + 36}" text-anchor="middle" font-size="${L.sub}" fill="var(--muted)">${l2}</text>` : ""}`}`;
 
   const t = f.today || {};
   const evState = !ev ? "" : evOn ? "Charging" : ev.vehicle_connected ? "Plugged in" : "Disconnected";
-  const H_SVG = ev ? 420 : 400;
+  const stat = (label, v) => `<div><span>${label}</span><b>${v}</b></div>`;
   container.innerHTML = `
     <div class="chart-wrap">
-      <svg viewBox="0 0 700 ${H_SVG}" role="img" aria-label="Energy flow">
+      <svg class="flow-svg${portrait ? " portrait" : ""}" viewBox="0 0 ${L.W} ${L.H}" role="img" aria-label="Energy flow">
         ${paths}
         ${node(S, "☀️", CLR.sun, fmtW2(pv), "Solar", "", true)}
         ${node(G, "⚡", CLR.grid, fmtW2(Math.abs(imp - exp)), "Grid", gridState)}
@@ -879,15 +916,34 @@ function renderFlow(container, sub, f, ev) {
       </svg>
     </div>
     <div class="flow-today">
-      <span>Today: solar <b>${fmtKWh(t.pv_wh)}</b></span>
-      <span>home <b>${fmtKWh(t.load_wh)}</b></span>
-      <span>imported <b>${fmtKWh(t.import_wh)}</b></span>
-      <span>exported <b>${fmtKWh(t.export_wh)}</b></span>
-      <span>charged <b>${fmtKWh(t.batt_charge_wh)}</b></span>
-      <span>discharged <b>${fmtKWh(t.batt_discharge_wh)}</b></span>
-      ${ev?.session_wh != null ? `<span>EV session <b>${fmtKWh(ev.session_wh)}</b></span>` : ""}
+      ${stat("Solar today", fmtKWh(t.pv_wh))}
+      ${stat("Home", fmtKWh(t.load_wh))}
+      ${stat("Exported", fmtKWh(t.export_wh))}
+      ${stat("Imported", fmtKWh(t.import_wh))}
+      ${stat("Charged", fmtKWh(t.batt_charge_wh))}
+      ${stat("Discharged", fmtKWh(t.batt_discharge_wh))}
+      ${ev?.session_wh != null ? stat("EV session", fmtKWh(ev.session_wh)) : ""}
     </div>`;
+  if (lastFlow.args?.[0] !== container) flowObserver.observe(container);
+  lastFlow.args = [container, sub, f, ev];
 }
+
+// Redraw the flow when the card crosses the portrait/landscape width
+// (phone rotation, window resize) without waiting for the next poll.
+const lastFlow = { args: null };
+// Also run when the Overview tab is shown: drawn while hidden, the card
+// had no width to measure.
+function syncFlowLayout() {
+  const a = lastFlow.args;
+  if (!a || !a[0].isConnected || !a[0].clientWidth) return;
+  const want = a[0].clientWidth < 520 ? "1" : "";
+  if (want !== (a[0].dataset.portrait || "")) renderFlow(...a);
+}
+let flowResizeTimer;
+const flowObserver = new ResizeObserver(() => {
+  clearTimeout(flowResizeTimer);
+  flowResizeTimer = setTimeout(syncFlowLayout, 150);
+});
 
 /* ---------------- Panels (optimizers) ---------------- */
 
@@ -1528,6 +1584,7 @@ function showSection(sec) {
     else b.removeAttribute("aria-current");
   });
   if (sec === "energy") energyControls.sync();
+  if (sec === "overview") syncFlowLayout();
   if (sec === "system") renderLinks();
   tick();
 }
