@@ -249,6 +249,9 @@ const fmt = v => {
   return { value: String(v), unit: "" };
 };
 const pct = v => v == null ? "—" : (v * 100).toFixed(1);
+// Escape API-provided text (device names etc.) before putting it in innerHTML.
+const esc = v => String(v ?? "").replace(/[&<>"']/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 
 async function getJSON(url) {
   const r = await fetch(url);
@@ -923,10 +926,10 @@ function renderAppliances(el, data) {
         ${devices.length ? devices.map(d => `
           <div class="appl-row">
             <div class="appl-info">
-              <div class="name">${d.name}${d.type && d.type !== d.name ? ` · ${d.type}` : ""}</div>
-              <div class="meta">${d.status}${d.program ? ` · ${d.program}` : ""}${d.phase ? ` · ${d.phase}` : ""}${d.remaining_min ? ` · ${d.remaining_min} min left` : ""}${d.startable ? " · waiting for start" : ""}</div>
+              <div class="name">${esc(d.name)}${d.type && d.type !== d.name ? ` · ${esc(d.type)}` : ""}</div>
+              <div class="meta">${esc(d.status)}${d.program ? ` · ${esc(d.program)}` : ""}${d.phase ? ` · ${esc(d.phase)}` : ""}${d.remaining_min ? ` · ${d.remaining_min} min left` : ""}${d.startable ? " · waiting for start" : ""}</div>
             </div>
-            <button class="btn" data-id="${d.id}" ${d.startable ? "" : "disabled"}
+            <button class="btn" data-id="${esc(d.id)}" ${d.startable ? "" : "disabled"}
               title="${d.startable ? "Start now" : "Enable remote start on the appliance and select a program"}">▶ Start</button>
           </div>`).join("")
         : '<div class="muted">No appliances found on this Miele account.</div>'}
@@ -936,7 +939,7 @@ function renderAppliances(el, data) {
   el.querySelectorAll(".btn[data-id]").forEach(btn => btn.addEventListener("click", async () => {
     btn.disabled = true;
     try {
-      await postJSON(`/api/miele/devices/${btn.dataset.id}/start`);
+      await postJSON(`/api/miele/devices/${encodeURIComponent(btn.dataset.id)}/start`);
       btn.textContent = "✓ Started";
       setTimeout(refresh, 4000);
     } catch (e) {
@@ -973,14 +976,14 @@ function renderSonoff(el, data) {
         ${devices.length ? devices.map(d => `
           <div class="appl-row">
             <div class="appl-info">
-              <div class="name">${d.name}${d.model ? ` · ${d.model}` : ""}</div>
+              <div class="name">${esc(d.name)}${d.model ? ` · ${esc(d.model)}` : ""}</div>
               <div class="meta">
                 <span class="status${d.online ? "" : " off"}"><span class="dot"></span>${d.online ? "Online" : "Offline"}</span>
                 ${d.power_w != null ? ` · ${d.power_w.toFixed(1)} W` : ""}
                 ${d.voltage != null ? ` · ${d.voltage.toFixed(0)} V` : ""}
               </div>
             </div>
-            <button class="btn${d.switch === "on" ? "" : " ghost"}" data-id="${d.id}"
+            <button class="btn${d.switch === "on" ? "" : " ghost"}" data-id="${esc(d.id)}"
               data-on="${d.switch === "on" ? "0" : "1"}" data-mc="${d.multi_channel ? "1" : "0"}"
               ${d.online && d.switch != null ? "" : "disabled"}>
               ${d.switch === "on" ? "⏻ Turn off" : "⏻ Turn on"}</button>
@@ -992,7 +995,7 @@ function renderSonoff(el, data) {
   el.querySelectorAll(".btn[data-id]").forEach(btn => btn.addEventListener("click", async () => {
     btn.disabled = true;
     try {
-      await postJSON(`/api/ewelink/devices/${btn.dataset.id}/switch`,
+      await postJSON(`/api/ewelink/devices/${encodeURIComponent(btn.dataset.id)}/switch`,
         { on: btn.dataset.on === "1", multi_channel: btn.dataset.mc === "1" });
       setTimeout(refresh, 1500);
     } catch (e) {

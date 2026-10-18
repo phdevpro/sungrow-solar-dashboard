@@ -26,6 +26,14 @@ log = logging.getLogger("ewelink")
 
 TOKENS_KEY = "ewelink_tokens"
 OAUTH_PAGE = "https://c2ccdn.coolkit.cc/oauth/index.html"
+# 401 = invalid/revoked access token, 402 = access token expired.
+AUTH_ERRORS = (401, 402)
+
+
+class EWeLinkError(RuntimeError):
+    def __init__(self, code: Any, msg: Any):
+        super().__init__(f"eWeLink error {code}: {msg}")
+        self.code = code
 
 
 def _api_base() -> str:
@@ -38,6 +46,12 @@ def enabled() -> bool:
 
 def connected() -> bool:
     return storage.kv_get(TOKENS_KEY) is not None
+
+
+def disconnect() -> None:
+    """Forget the tokens so the UI offers to reconnect the account."""
+    storage.kv_delete(TOKENS_KEY)
+    log.warning("ewelink: tokens rejected, account disconnected")
 
 
 def _sign(message: bytes) -> str:
@@ -82,7 +96,7 @@ async def _signed_post(path: str, body: dict[str, Any]) -> dict[str, Any]:
         r.raise_for_status()
         data = r.json()
     if data.get("error"):
-        raise RuntimeError(f"eWeLink error {data.get('error')}: {data.get('msg')}")
+        raise EWeLinkError(data.get("error"), data.get("msg"))
     return data.get("data", {})
 
 
@@ -103,7 +117,12 @@ async def _access_token() -> str:
     tokens = json.loads(raw)
     if time.time() < tokens["expires_at"]:
         return tokens["access_token"]
-    data = await _signed_post("/v2/user/refresh", {"rt": tokens["refresh_token"]})
+    try:
+        data = await _signed_post("/v2/user/refresh", {"rt": tokens["refresh_token"]})
+    except EWeLinkError:
+        # Refresh token expired or revoked: only a new OAuth login helps.
+        disconnect()
+        raise
     _save_tokens({
         "accessToken": data.get("at") or data.get("accessToken"),
         "refreshToken": data.get("rt") or data.get("refreshToken"),
@@ -120,10 +139,14 @@ async def _request(method: str, path: str, **kwargs) -> dict[str, Any]:
             "X-CK-Nonce": pysecrets.token_hex(4),
             "Content-Type": "application/json",
         }, **kwargs)
+        if r.status_code == 401:
+            disconnect()
         r.raise_for_status()
         data = r.json()
     if data.get("error"):
-        raise RuntimeError(f"eWeLink error {data.get('error')}: {data.get('msg')}")
+        if data.get("error") in AUTH_ERRORS:
+            disconnect()
+        raise EWeLinkError(data.get("error"), data.get("msg"))
     return data.get("data", {})
 
 
@@ -134,14 +157,18 @@ def _num(v) -> float | None:
         return None
 
 
-def _power_w(params: dict[str, Any], uiid: int | None) -> float | None:
-    p = _num(params.get("power"))
-    if p is None:
+# Newer meters (POWR3/Elite/SPM, uiid 190/182) report integer hundredths
+# of W, V and A; older POW models send plain decimal strings.
+HUNDREDTHS_UIIDS = (182, 190)
+
+
+def _metric(params: dict[str, Any], key: str, uiid: int | None) -> float | None:
+    v = _num(params.get(key))
+    if v is None:
         return None
-    # Newer meters (POWR3/Elite/SPM, uiid 190/182/…) report hundredths of W.
-    if isinstance(params.get("power"), int) and uiid in (182, 190, 5):
-        return p / 100 if uiid in (182, 190) else p
-    return p
+    if uiid in HUNDREDTHS_UIIDS and isinstance(params.get(key), int):
+        return v / 100
+    return v
 
 
 async def get_devices() -> list[dict[str, Any]]:
@@ -167,9 +194,9 @@ async def get_devices() -> list[dict[str, Any]]:
             "online": bool(d.get("online")),
             "switch": switch,                       # "on" | "off" | None
             "multi_channel": isinstance(params.get("switches"), list),
-            "power_w": _power_w(params, uiid),
-            "voltage": _num(params.get("voltage")),
-            "current": _num(params.get("current")),
+            "power_w": _metric(params, "power", uiid),
+            "voltage": _metric(params, "voltage", uiid),
+            "current": _metric(params, "current", uiid),
         })
     return out
 

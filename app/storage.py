@@ -193,6 +193,10 @@ def kv_put(key: str, value: str) -> None:
     _execmany("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", [(key, value)])
 
 
+def kv_delete(key: str) -> None:
+    _execmany("DELETE FROM kv WHERE k = ?", [(key,)])
+
+
 def store_flow(ps_id: str, ts: str, flow: dict[str, Any], replace: bool = True) -> None:
     """replace=False keeps existing rows intact (used by API backfill, whose
     rows lack pv/soc and must not clobber richer collector samples)."""

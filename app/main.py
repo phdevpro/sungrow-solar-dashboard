@@ -531,6 +531,8 @@ async def ewelink_devices():
     try:
         devices = await ewelink.get_devices()
     except Exception as exc:
+        if not ewelink.connected():  # tokens rejected: offer to reconnect
+            return {"connected": False, "devices": []}
         raise HTTPException(status_code=502, detail=f"eWeLink API: {exc}")
     return cache_put("ewelink", {"connected": True, "devices": devices})
 
