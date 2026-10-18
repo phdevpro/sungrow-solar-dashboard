@@ -23,6 +23,8 @@
     --accent:    #eda100;
     --series:    #2a78d6;
     --meter-track: #cde2fb;
+    --warn-bg:   #fff3d6;
+    --warn-ink:  #6b4a00;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -39,6 +41,8 @@
       --accent:    #c98500;
       --series:    #3987e5;
       --meter-track: #184f95;
+      --warn-bg:   #3a2a05;
+      --warn-ink:  #f2c35a;
     }
   }
   * { box-sizing: border-box; }
@@ -49,7 +53,7 @@
   .wrap { max-width: 1060px; margin: 0 auto; padding: 2rem 1.5rem 3rem; }
 
   header.page {
-    display: flex; align-items: baseline; justify-content: space-between;
+    display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between;
     gap: 1rem; margin-bottom: 1.5rem;
   }
   header.page h1 { font-size: 1.35rem; margin: 0; letter-spacing: -0.01em; }
@@ -227,6 +231,61 @@
   .status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
   .status.off .dot { background: var(--muted); }
 
+  /* Sections */
+  .tabs {
+    display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin-bottom: 1.25rem;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+  }
+  .tabs button {
+    min-height: 40px; padding: 0 1rem; border: 0; border-radius: 9px; background: transparent;
+    color: var(--ink-2); font: inherit; font-size: 0.9rem; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 0.45rem;
+  }
+  .tabs button[aria-current="page"] { background: var(--ink); color: var(--page); font-weight: 600; }
+  .tabs .badge {
+    min-width: 18px; padding: 0 6px; border-radius: 999px; background: var(--accent);
+    color: #0b0b0b; font-size: 0.7rem; font-weight: 700; line-height: 18px; text-align: center;
+  }
+  .tabs .badge:empty { display: none; }
+  section[hidden] { display: none; }
+  section > .card:first-child, .cols > .card, .col > .card:first-child { margin-top: 0; }
+  section > * + * { margin-top: 1.25rem; }
+  .cols { display: flex; flex-wrap: wrap; gap: 1.25rem; align-items: flex-start; }
+  .cols > .wide { flex: 999 1 560px; min-width: 0; }
+  .cols > .col { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+  .cols > .half { flex: 1 1 360px; min-width: 0; }
+  .col > .card { margin-top: 0; }
+  .kpi-grid.side { grid-template-columns: repeat(2, 1fr); }
+  .kpi-grid.side .tile.hero { grid-column: span 2; }
+  .sum-row { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.85rem; padding: 0.3rem 0; }
+  .sum-row span:last-child { color: var(--ink-2); text-align: right; }
+  .linkish { border: 0; background: none; color: var(--series); font: inherit; font-size: 0.78rem; font-weight: 600; cursor: pointer; padding: 0; }
+  .attn { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 0.6rem; }
+  .attn-item { padding: 0.7rem 0.85rem; border-radius: 10px; background: var(--warn-bg); font-size: 0.85rem; }
+  .attn-item b { color: var(--warn-ink); display: block; }
+  .attn-item.info { background: var(--page); border: 1px solid var(--border); }
+  .attn-item.info b { color: var(--ink); }
+  .ok-note { color: var(--muted); font-size: 0.85rem; }
+  /* Refresh states: content stays while updating; stale data is greyed. */
+  .card > h3 .live-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--series);
+    display: inline-block; margin-left: 0.4rem; vertical-align: middle; opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .card.updating > h3 .live-dot { opacity: 1; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  .stale-badge {
+    font-size: 0.7rem; font-weight: 600; color: var(--warn-ink); background: var(--warn-bg);
+    padding: 0.1rem 0.5rem; border-radius: 999px; white-space: nowrap;
+  }
+  .card.stale .card-body, .card.stale .table-scroll { opacity: 0.55; }
+  .skel { height: 120px; border-radius: 8px; background: var(--hairline); animation: pulse 1.4s ease-in-out infinite; }
+  .plant-select { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 0.8rem; padding: 0.2rem 0.4rem; }
+  header.page .sub-line { color: var(--muted); font-size: 0.82rem; margin-top: 0.15rem; }
+  header.page .live { display: inline-flex; align-items: center; gap: 0.4rem; }
+  header.page .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+  header.page .live.paused .dot, header.page .live.late .dot { background: var(--accent); }
+
   .error {
     background: var(--surface); border: 1px solid var(--border); border-left: 3px solid #d03b3b;
     border-radius: 10px; padding: 0.8rem 1rem; white-space: pre-wrap; font-size: 0.9rem;
@@ -238,14 +297,109 @@
 <body>
 <div class="wrap">
   <header class="page">
-    <h1>Sungrow Solar Dashboard</h1>
+    <div>
+      <h1>Sungrow Solar Dashboard</h1>
+      <div class="sub-line" id="plant-line"></div>
+    </div>
     <span class="head-right">
       <span class="wx-now" id="wx-now"></span>
-      <span class="updated" id="updated"></span>
+      <span class="updated live" id="updated"><span class="dot"></span><span class="txt">connecting…</span></span>
       <a class="logout" href="/logout" title="Sign out">Sign out</a>
     </span>
   </header>
-  <main id="app" class="muted">Loading plants…</main>
+
+  <nav class="tabs" aria-label="Sections">
+    <button data-sec="overview">Overview <span class="badge" id="attn-badge"></span></button>
+    <button data-sec="energy">Energy</button>
+    <button data-sec="solar">Solar</button>
+    <button data-sec="storage">Storage &amp; EV</button>
+    <button data-sec="home">Home</button>
+    <button data-sec="system">System</button>
+  </nav>
+
+  <main id="app">
+    <section data-sec="overview" hidden>
+      <div class="cols">
+        <div class="card wide" id="card-flow">
+          <h3><span>Energy flow<i class="live-dot"></i></span> <span class="sub flow-sub"></span></h3>
+          <div class="card-body flow-slot"><div class="skel"></div></div>
+        </div>
+        <div class="col">
+          <div class="kpi-grid side" id="kpi-slot"></div>
+          <div class="card" id="card-homesum" hidden>
+            <h3><span>Home right now</span> <button class="linkish" data-goto="home">Open</button></h3>
+            <div class="card-body homesum-slot"></div>
+          </div>
+        </div>
+      </div>
+      <div class="card" id="card-attn">
+        <h3><span>Needs attention</span></h3>
+        <div class="card-body attn-slot"><div class="ok-note">Checking…</div></div>
+      </div>
+    </section>
+
+    <section data-sec="energy" hidden>
+      <div class="card" id="card-energy">
+        <h3><span>Energy<i class="live-dot"></i></span> <span class="sub curve-max"></span></h3>
+        <div class="chart-controls">
+          <div class="seg">
+            <button data-p="day">Day</button><button data-p="month">Month</button><button data-p="year">Year</button>
+          </div>
+          <div class="nav">
+            <button class="nav-btn prev" aria-label="Previous">‹</button>
+            <span class="date-label"></span>
+            <button class="nav-btn next" aria-label="Next">›</button>
+            <input class="date-input" type="date" aria-label="Pick date">
+          </div>
+        </div>
+        <div class="card-body curve-slot"><div class="skel"></div></div>
+      </div>
+    </section>
+
+    <section data-sec="solar" hidden>
+      <div class="card" id="card-panels">
+        <h3><span>Panels<i class="live-dot"></i></span> <span class="sub panels-sub"></span></h3>
+        <div class="card-body panels-slot"><div class="skel"></div></div>
+      </div>
+    </section>
+
+    <section data-sec="storage" hidden>
+      <div class="card" id="card-batt">
+        <h3><span>Battery storage<i class="live-dot"></i></span> <span class="sub batt-sub"></span></h3>
+        <div class="card-body batt-slot"><div class="skel"></div></div>
+      </div>
+      <div class="card" id="card-ev" hidden>
+        <h3><span>EV charging<i class="live-dot"></i></span> <span class="sub">Wall Connector</span></h3>
+        <div class="card-body ev-slot"></div>
+      </div>
+    </section>
+
+    <section data-sec="home" hidden>
+      <div class="card" id="card-auto" hidden>
+        <h3><span>Solar surplus automations</span> <span class="sub">checked every 5 min</span></h3>
+        <div class="card-body auto-slot"></div>
+      </div>
+      <div id="aircon-slot"></div>
+      <div id="sonoff-slot"></div>
+      <div id="miele-slot"></div>
+      <div class="card" id="card-home-empty" hidden>
+        <div class="card-body muted">No home integrations configured (SmartThings, eWeLink or Miele).</div>
+      </div>
+    </section>
+
+    <section data-sec="system" hidden>
+      <div class="cols">
+        <div class="card half" id="card-devices">
+          <h3><span>Devices<i class="live-dot"></i></span> <span class="sub devices-sub"></span></h3>
+          <div class="table-scroll devices-slot"><div class="skel" style="margin:1rem 1.1rem"></div></div>
+        </div>
+        <div class="card half" id="card-links">
+          <h3><span>Connections</span></h3>
+          <div class="card-body links-slot"></div>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
 <script>
@@ -280,54 +434,13 @@ function tile(label, v, hero = false) {
   </div>`;
 }
 
-function plantHTML(p) {
-  const online = p.ps_status === 1;
+function kpiHTML(p) {
   return `
-    <div class="plant-head">
-      <div class="name-row">
-        <h2>${p.ps_name ?? "Plant " + p.ps_id}</h2>
-        <span class="pill"><span class="dot"${online ? "" : ' style="background:var(--muted)"'}></span>${online ? "Online" : "Offline"}</span>
-      </div>
-      <div class="loc">${p.ps_location ?? ""}</div>
-    </div>
-    <div class="kpi-grid">
-      ${tile("Current power", p.curr_power, true)}
-      ${tile("Energy today", p.today_energy)}
-      ${tile("Energy total", p.total_energy)}
-      ${tile("Income today", p.today_income)}
-      ${tile("CO₂ saved", p.co2_reduce_total)}
-    </div>
-    <div class="card">
-      <h3>Energy <span class="sub curve-max"></span></h3>
-      <div class="chart-controls">
-        <div class="seg">
-          <button data-p="day">Day</button><button data-p="month">Month</button><button data-p="year">Year</button>
-        </div>
-        <div class="nav">
-          <button class="nav-btn prev">‹</button>
-          <span class="date-label"></span>
-          <button class="nav-btn next">›</button>
-          <input class="date-input" type="date">
-        </div>
-      </div>
-      <div class="card-body curve-slot"><div class="muted">Loading…</div></div>
-    </div>
-    <div class="card">
-      <h3>Energy flow <span class="sub flow-sub"></span></h3>
-      <div class="card-body flow-slot"><div class="muted">Loading…</div></div>
-    </div>
-    <div class="card">
-      <h3>Panels <span class="sub panels-sub"></span></h3>
-      <div class="card-body panels-slot"><div class="muted">Loading…</div></div>
-    </div>
-    <div class="card">
-      <h3>Battery storage <span class="sub batt-sub"></span></h3>
-      <div class="card-body batt-slot"><div class="muted">Loading…</div></div>
-    </div>
-    <div class="card">
-      <h3>Devices <span class="sub">${fmt(p.total_capcity).value} ${fmt(p.total_capcity).unit} installed</span></h3>
-      <div class="table-scroll devices-slot"><div class="muted pad">Loading…</div></div>
-    </div>`;
+    ${tile("Current power", p.curr_power, true)}
+    ${tile("Energy today", p.today_energy)}
+    ${tile("Energy total", p.total_energy)}
+    ${tile("Income today", p.today_income)}
+    ${tile("CO₂ saved", p.co2_reduce_total)}`;
 }
 
 /* ---------------- Weather (Open-Meteo WMO codes) ---------------- */
@@ -369,24 +482,23 @@ function shiftDate(st, dir) {
   st.date = d;
 }
 
-function wireEnergyCard(el, psId) {
-  const st = getEState(psId);
-  const slot = el.querySelector(".curve-slot");
-  const sub = el.querySelector(".curve-max");
+function wireEnergyCard(el) {
   const segBtns = el.querySelectorAll(".seg button");
   const label = el.querySelector(".date-label");
   const input = el.querySelector(".date-input");
   const prev = el.querySelector(".prev"), next = el.querySelector(".next");
+  const st = () => getEState(cur.psId);
 
   const syncControls = () => {
-    segBtns.forEach(b => b.classList.toggle("on", b.dataset.p === st.period));
-    const d = st.date;
-    if (st.period === "day") {
+    const s = st();
+    segBtns.forEach(b => b.classList.toggle("on", b.dataset.p === s.period));
+    const d = s.date;
+    if (s.period === "day") {
       label.textContent = `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
       input.type = "date";
       input.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
       input.style.display = "";
-    } else if (st.period === "month") {
+    } else if (s.period === "month") {
       label.textContent = `${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
       input.type = "month";
       input.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
@@ -397,47 +509,58 @@ function wireEnergyCard(el, psId) {
     }
     const now = new Date();
     next.disabled =
-      (st.period === "day" && ymd(d) >= ymd(now)) ||
-      (st.period === "month" && d.getFullYear() === now.getFullYear() && d.getMonth() >= now.getMonth()) ||
-      (st.period === "year" && d.getFullYear() >= now.getFullYear());
+      (s.period === "day" && ymd(d) >= ymd(now)) ||
+      (s.period === "month" && d.getFullYear() === now.getFullYear() && d.getMonth() >= now.getMonth()) ||
+      (s.period === "year" && d.getFullYear() >= now.getFullYear());
   };
+  energyControls.sync = syncControls;
 
-  const reload = () => { syncControls(); loadEnergy(slot, sub, psId, st); };
+  // A user-picked period/date replaces the chart, so show a skeleton.
+  const reload = () => {
+    syncControls();
+    el.querySelector(".curve-slot").innerHTML = '<div class="skel"></div>';
+    el.querySelector(".curve-max").textContent = "";
+    bump("energy");
+  };
   segBtns.forEach(b => b.addEventListener("click", () => {
-    st.period = b.dataset.p; st.date = new Date(); reload();
+    st().period = b.dataset.p; st().date = new Date(); reload();
   }));
-  prev.addEventListener("click", () => { shiftDate(st, -1); reload(); });
-  next.addEventListener("click", () => { shiftDate(st, 1); reload(); });
+  prev.addEventListener("click", () => { shiftDate(st(), -1); reload(); });
+  next.addEventListener("click", () => { shiftDate(st(), 1); reload(); });
   input.addEventListener("change", () => {
     if (!input.value) return;
     const parts = input.value.split("-").map(Number);
-    st.date = new Date(parts[0], (parts[1] ?? 1) - 1, parts[2] ?? 1);
+    st().date = new Date(parts[0], (parts[1] ?? 1) - 1, parts[2] ?? 1);
     reload();
   });
-  reload();
+  syncControls();
+}
+const energyControls = { sync: () => {} };
+
+// Viewing the current day/month/year: the chart keeps growing, so it is
+// worth refreshing. Past periods never change.
+function energyIsLive(st) {
+  const now = new Date(), d = st.date;
+  if (st.period === "day") return ymd(d) === ymd(now);
+  if (st.period === "month") return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  return d.getFullYear() === now.getFullYear();
 }
 
 async function loadEnergy(slot, sub, psId, st) {
-  slot.innerHTML = '<div class="muted">Loading…</div>';
-  sub.textContent = "";
-  try {
-    if (st.period === "day") {
-      const date = ymd(st.date);
-      const [curve, flowHist, weather] = await Promise.all([
-        getJSON(`/api/plants/${psId}/curve?date=${date}`),
-        getJSON(`/api/plants/${psId}/flow/history?date=${date}`).catch(() => null),
-        getJSON(`/api/plants/${psId}/weather?date=${date}`).catch(() => null),
-      ]);
-      renderDayChart(slot, sub, curve, flowHist, weather);
-    } else {
-      const date = st.period === "month"
-        ? `${st.date.getFullYear()}${pad2(st.date.getMonth() + 1)}`
-        : String(st.date.getFullYear());
-      const data = await getJSON(`/api/plants/${psId}/energy?period=${st.period}&date=${date}`);
-      renderAggChart(slot, sub, data, st.period);
-    }
-  } catch (e) {
-    slot.innerHTML = `<div class="error">${e.message}</div>`;
+  if (st.period === "day") {
+    const date = ymd(st.date);
+    const [curve, flowHist, weather] = await Promise.all([
+      getJSON(`/api/plants/${psId}/curve?date=${date}`),
+      getJSON(`/api/plants/${psId}/flow/history?date=${date}`).catch(() => null),
+      getJSON(`/api/plants/${psId}/weather?date=${date}`).catch(() => null),
+    ]);
+    renderDayChart(slot, sub, curve, flowHist, weather);
+  } else {
+    const date = st.period === "month"
+      ? `${st.date.getFullYear()}${pad2(st.date.getMonth() + 1)}`
+      : String(st.date.getFullYear());
+    const data = await getJSON(`/api/plants/${psId}/energy?period=${st.period}&date=${date}`);
+    renderAggChart(slot, sub, data, st.period);
   }
 }
 
@@ -921,13 +1044,8 @@ function renderAppliances(el, data) {
   const devices = data.devices || [];
   el.innerHTML = `
     <div class="card">
-      <h3>Appliances
-        <span class="sub">
-          <label class="auto-toggle">
-            <input type="checkbox" ${data.auto ? "checked" : ""}>
-            Start on solar surplus (&gt; ${(data.surplus_w / 1000).toFixed(1)} kW export, battery ≥ ${Math.round((data.min_soc ?? 0) * 100)}%)
-          </label>
-        </span>
+      <h3><span>Appliances<i class="live-dot"></i></span>
+        <span class="sub">${data.auto ? "solar auto-start on" : ""}</span>
       </h3>
       <div class="card-body">
         ${devices.length ? devices.map(d => `
@@ -948,15 +1066,12 @@ function renderAppliances(el, data) {
     try {
       await postJSON(`/api/miele/devices/${encodeURIComponent(btn.dataset.id)}/start`);
       btn.textContent = "✓ Started";
-      setTimeout(refresh, 4000);
+      bump("miele", 4000);
     } catch (e) {
       btn.textContent = "Error";
       btn.title = e.message;
     }
   }));
-  const toggle = el.querySelector(".auto-toggle input");
-  toggle.addEventListener("change", () =>
-    postJSON("/api/miele/auto", { enabled: toggle.checked }).catch(() => {}));
 }
 
 /* ---------------- Sonoff / eWeLink ---------------- */
@@ -976,7 +1091,7 @@ function renderSonoff(el, data) {
   const totalW = devices.reduce((a, d) => a + (d.power_w ?? 0), 0);
   el.innerHTML = `
     <div class="card">
-      <h3>Smart plugs
+      <h3><span>Smart plugs<i class="live-dot"></i></span>
         <span class="sub">${devices.length} devices${totalW ? ` · ${totalW.toFixed(0)} W measured` : ""}</span>
       </h3>
       <div class="card-body">
@@ -1004,7 +1119,7 @@ function renderSonoff(el, data) {
     try {
       await postJSON(`/api/ewelink/devices/${encodeURIComponent(btn.dataset.id)}/switch`,
         { on: btn.dataset.on === "1", multi_channel: btn.dataset.mc === "1" });
-      setTimeout(refresh, 1500);
+      bump("sonoff", 1500);
     } catch (e) {
       btn.textContent = "Error";
       btn.title = e.message;
@@ -1031,14 +1146,8 @@ function renderAircon(el, data) {
   const totalW = devices.reduce((a, d) => a + (d.switch === "on" ? d.power_w ?? 0 : 0), 0);
   el.innerHTML = `
     <div class="card">
-      <h3>Air conditioning
-        <span class="sub">
-          ${totalW ? `${totalW.toFixed(0)} W now · ` : ""}
-          <label class="auto-toggle">
-            <input type="checkbox" class="ac-auto" ${data.auto ? "checked" : ""}>
-            Run on solar surplus (&gt; ${(data.surplus_w / 1000).toFixed(1)} kW export, battery ≥ ${Math.round((data.min_soc ?? 0) * 100)}%)
-          </label>
-        </span>
+      <h3><span>Air conditioning<i class="live-dot"></i></span>
+        <span class="sub">${totalW ? `${totalW.toFixed(0)} W now` : ""}</span>
       </h3>
       <div class="card-body">
         ${devices.length ? devices.map(d => {
@@ -1078,7 +1187,7 @@ function renderAircon(el, data) {
     ctl.disabled = true;
     try {
       await postJSON(`/api/aircon/${encodeURIComponent(row.dataset.id)}`, body);
-      setTimeout(refresh, 2500);
+      bump("aircon", 2500);
     } catch (e) {
       ctl.disabled = false;
       ctl.title = e.message;
@@ -1097,141 +1206,429 @@ function renderAircon(el, data) {
       row.querySelector(".sp").textContent = d.setpoint_c.toFixed(1) + "°";
       // Debounce: send once the user stops tapping.
       clearTimeout(row._spTimer);
-      row._spTimer = setTimeout(() => send(row, { setpoint: d.setpoint_c }, b), 800);
+      el.dataset.hold = "1";
+      row._spTimer = setTimeout(() => {
+        delete el.dataset.hold;
+        send(row, { setpoint: d.setpoint_c }, b);
+      }, 800);
     }));
     row.querySelector(".ac-dev-auto").addEventListener("change", e =>
       postJSON("/api/aircon-auto", { device_id: d.id, device_on: e.currentTarget.checked }).catch(() => {}));
   });
-  const toggle = el.querySelector(".ac-auto");
-  toggle.addEventListener("change", () =>
-    postJSON("/api/aircon-auto", { enabled: toggle.checked }).catch(() => {}));
 }
 
 /* ---------------- Devices ---------------- */
 
-async function loadDevices(psId, container) {
-  try {
-    const data = await getJSON(`/api/plants/${psId}/devices`);
-    const list = data.pageList || data.list || [];
-    if (!list.length) {
-      container.innerHTML = '<div class="muted pad">No devices.</div>';
-      return;
+function renderDevices(container, sub, data, plant) {
+  const list = data.pageList || data.list || [];
+  const cap = fmt(plant?.total_capcity);
+  sub.textContent = plant?.total_capcity != null ? `${cap.value} ${cap.unit} installed` : "";
+  if (!list.length) {
+    container.innerHTML = '<div class="muted pad">No devices.</div>';
+    return;
+  }
+  container.innerHTML = `<table>
+    <tr><th>Name</th><th>Type</th><th>Model</th><th>Serial number</th><th>Status</th></tr>
+    ${list.map(d => {
+      const on = d.dev_status === "1";
+      return `<tr>
+        <td>${esc(d.device_name)}</td>
+        <td>${esc(d.type_name ?? d.device_type)}</td>
+        <td>${esc(d.device_model_code)}</td>
+        <td class="sn">${esc(d.device_sn)}</td>
+        <td><span class="status${on ? "" : " off"}"><span class="dot"></span>${on ? "Online" : "Offline"}</span></td>
+      </tr>`;
+    }).join("")}
+  </table>`;
+}
+
+/* ---------------- EV, overview summaries ---------------- */
+
+function renderEV(container, ev) {
+  const evOn = ev.charging && (ev.power_w ?? 0) > 15;
+  const state = evOn ? "Charging" : ev.vehicle_connected ? "Plugged in" : "Idle";
+  container.innerHTML = `
+    <div class="batt-system" style="border:0;margin:0;padding:0">
+      <div>
+        <div class="label">${ev.vehicle_connected ? "Car connected" : "Car not connected"}</div>
+        <div class="big">${state}</div>
+        <div class="stored">${evOn ? fmtW2(ev.power_w) + " · " : ""}session ${fmtKWh(ev.session_wh)}${ev.lifetime_wh != null ? ` · lifetime ${fmtKWh(ev.lifetime_wh)}` : ""}</div>
+      </div>
+    </div>`;
+}
+
+// Latest payload per integration, shared by the Home cards, the overview
+// summary, the automations card and the Connections list.
+const home = { aircon: undefined, sonoff: undefined, miele: undefined };
+
+function renderHomeSummary() {
+  const card = document.getElementById("card-homesum");
+  const rows = [];
+  const ac = home.aircon;
+  if (ac?.connected) {
+    const on = ac.devices.filter(d => d.switch === "on");
+    const w = on.reduce((a, d) => a + (d.power_w ?? 0), 0);
+    rows.push(["Air conditioning", `${on.length} of ${ac.devices.length} on${w ? ` · ${w.toFixed(0)} W` : ""}`]);
+  }
+  const so = home.sonoff;
+  if (so?.connected) {
+    const on = so.devices.filter(d => d.switch === "on");
+    const w = so.devices.reduce((a, d) => a + (d.power_w ?? 0), 0);
+    rows.push(["Smart plugs", `${on.length} on${w ? ` · ${w.toFixed(0)} W` : ""}`]);
+  }
+  const mi = home.miele;
+  if (mi?.connected) {
+    const run = mi.devices.find(d => d.status_code === 5);
+    const ready = mi.devices.find(d => d.startable);
+    rows.push(["Appliances", run ? `${run.name} running` : ready ? `${ready.name} ready to start` : "idle"]);
+  }
+  card.hidden = !rows.length;
+  card.querySelector(".homesum-slot").innerHTML = rows.map(([k, v]) =>
+    `<div class="sum-row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
+}
+
+function renderAutomations() {
+  const card = document.getElementById("card-auto");
+  const items = [];
+  const ac = home.aircon, mi = home.miele;
+  if (ac?.connected) items.push({
+    key: "ac", on: ac.auto, title: "Air conditioning",
+    text: `Switch on a unit marked “Use for solar surplus” above ${(ac.surplus_w / 1000).toFixed(1)} kW export with battery ≥ ${Math.round(ac.min_soc * 100)}%. Switch it off after 10 min drawing more than ${ac.stop_w} W from battery or grid.`,
+  });
+  if (mi?.connected) items.push({
+    key: "miele", on: mi.auto, title: "Miele appliances",
+    text: `Start a programmed appliance above ${(mi.surplus_w / 1000).toFixed(1)} kW export with battery ≥ ${Math.round((mi.min_soc ?? 0) * 100)}%.`,
+  });
+  card.hidden = !items.length;
+  const slot = card.querySelector(".auto-slot");
+  if (slot.contains(document.activeElement)) return;
+  slot.innerHTML = `<div class="attn">${items.map(i => `
+    <label class="attn-item info" style="display:flex;gap:0.7rem;align-items:flex-start;cursor:pointer">
+      <input type="checkbox" data-auto="${i.key}" ${i.on ? "checked" : ""} style="width:18px;height:18px;margin:0.1rem 0 0">
+      <span><b>${i.title}</b><span class="muted">${esc(i.text)}</span></span>
+    </label>`).join("")}</div>`;
+  slot.querySelectorAll("input[data-auto]").forEach(cb => cb.addEventListener("change", () => {
+    const url = cb.dataset.auto === "ac" ? "/api/aircon-auto" : "/api/miele/auto";
+    postJSON(url, { enabled: cb.checked })
+      .then(() => bump(cb.dataset.auto === "ac" ? "aircon" : "miele"))
+      .catch(e => { cb.checked = !cb.checked; alert(e.message); });
+  }));
+}
+
+const lastPanels = { data: null };
+
+function renderAttention() {
+  const items = [];
+  const dead = (lastPanels.data?.panels || [])
+    .map((p, i) => ({ p, i })).filter(x => !x.p.reporting);
+  for (const { p, i } of dead) items.push({
+    warn: true, title: `Optimizer #${i + 1} is not reporting`,
+    text: `SN ${p.sn ?? "?"} · no data received from this unit. Check wiring/pairing or contact the installer.`,
+  });
+  const names = { aircon: ["SmartThings", "/api/smartthings/login"], sonoff: ["eWeLink", "/api/ewelink/login"], miele: ["Miele", "/api/miele/login"] };
+  for (const [k, [name, url]] of Object.entries(names)) {
+    if (home[k] && home[k].connected === false) items.push({
+      warn: false, title: `${name} not connected`,
+      html: `<a href="${url}">Connect ${name} account</a>`,
+    });
+  }
+  for (const L of Object.values(loaders)) {
+    if (L.error && L.ok === 0 && L.name !== "devices") items.push({
+      warn: true, title: `${L.label} unavailable`, text: L.error,
+    });
+  }
+  document.getElementById("attn-badge").textContent = items.filter(i => i.warn).length || "";
+  document.querySelector("#card-attn .attn-slot").innerHTML = items.length
+    ? `<div class="attn">${items.map(i => `<div class="attn-item${i.warn ? "" : " info"}">
+        <b>${esc(i.title)}</b>${i.html ?? esc(i.text)}</div>`).join("")}</div>`
+    : '<div class="ok-note">All systems reporting.</div>';
+}
+
+function renderLinks() {
+  const ago = ts => {
+    if (!ts) return "never";
+    const s = Math.round((Date.now() - ts) / 1000);
+    return s < 90 ? `${s}s ago` : `${Math.round(s / 60)} min ago`;
+  };
+  const rows = [["iSolarCloud", loaders.plants.ok ? `Connected · ${ago(loaders.plants.ok)}` : (loaders.plants.error || "Connecting…")]];
+  const names = { aircon: "SmartThings", sonoff: "eWeLink", miele: "Miele" };
+  for (const [k, name] of Object.entries(names)) {
+    const d = home[k];
+    rows.push([name, d === null ? "Not configured" : d === undefined ? "…" : d.connected ? "Connected" : "Not connected"]);
+  }
+  const ev = loaders.ev;
+  rows.push(["Wall Connector", ev.disabled ? "No data" : ev.ok ? `Reporting · ${ago(ev.ok)}` : "…"]);
+  document.querySelector("#card-links .links-slot").innerHTML = rows.map(([k, v]) =>
+    `<div class="sum-row"><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("");
+}
+
+/* ---------------- Refresh scheduler ----------------
+   The page shell is built once. Each card has a loader with its own
+   interval; only loaders for the open section (plus "*" ones) run, the
+   browser tab being hidden pauses everything, and a failed fetch keeps
+   the card's last content and marks it stale instead of wiping it. */
+
+const cur = { psId: null, plant: null, plants: [], sec: "overview" };
+const loaders = {};
+const S = 1000, MIN = 60 * S;
+
+function defLoader(name, opts) {
+  loaders[name] = { name, last: 0, ok: 0, busy: false, error: null, disabled: false, ...opts };
+}
+
+const cardEl = L => L.card ? document.getElementById(L.card) : null;
+
+// Don't re-render a card while someone is using a control in it.
+function isInteracting(card) {
+  if (!card) return false;
+  if (card.querySelector("[data-hold]") || card.dataset.hold) return true;
+  const a = document.activeElement;
+  return !!a && card.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName);
+}
+
+function setStale(card, L) {
+  if (!card) return;
+  const h = card.matches(".card") ? card : card.querySelector(".card");
+  if (!h) return;
+  const head = h.querySelector(":scope > h3");
+  let badge = head?.querySelector(".stale-badge");
+  if (L.error && L.ok) {
+    h.classList.add("stale");
+    if (head && !badge) {
+      badge = document.createElement("span");
+      badge.className = "stale-badge";
+      head.appendChild(badge);
     }
-    container.innerHTML = `<table>
-      <tr><th>Name</th><th>Type</th><th>Model</th><th>Serial number</th><th>Status</th></tr>
-      ${list.map(d => {
-        const on = d.dev_status === "1";
-        return `<tr>
-          <td>${d.device_name ?? ""}</td>
-          <td>${d.type_name ?? d.device_type ?? ""}</td>
-          <td>${d.device_model_code ?? ""}</td>
-          <td class="sn">${d.device_sn ?? ""}</td>
-          <td><span class="status${on ? "" : " off"}"><span class="dot"></span>${on ? "Online" : "Offline"}</span></td>
-        </tr>`;
-      }).join("")}
-    </table>`;
-  } catch (e) {
-    container.innerHTML = `<div class="error" style="margin:0.8rem 1.1rem">${e.message}</div>`;
+    if (badge) {
+      badge.textContent = `data from ${new Date(L.ok).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      badge.title = `${L.error} · retrying`;
+    }
+  } else {
+    h.classList.remove("stale");
+    badge?.remove();
   }
 }
 
-/* ---------------- Page assembly ---------------- */
-
-function loadSection(url, render, slot, ...extra) {
-  getJSON(url)
-    .then(data => render(slot, ...extra, data))
-    .catch(e => { slot.innerHTML = `<div class="error">${e.message}</div>`; });
-}
-
-async function refresh() {
-  const app = document.getElementById("app");
+async function runLoader(L, force = false) {
+  if (L.busy || L.disabled || !cur.psId && L.needsPlant) return;
+  if (!force && Date.now() - L.last < L.every) return;
+  const card = cardEl(L);
+  if (!force && isInteracting(card)) return;
+  L.busy = true;
+  const h = card?.matches(".card") ? card : card?.querySelector(".card");
+  h?.classList.add("updating");
   try {
-    const data = await getJSON("/api/plants");
-    const plants = data.pageList || data.list || [];
-    if (!plants.length) { app.innerHTML = "No plants found on this account."; return; }
-
-    app.className = "";
-    app.innerHTML = "";
-    let first = true;
-    for (const p of plants) {
-      const el = document.createElement("div");
-      el.className = "plant";
-      el.innerHTML = plantHTML(p);
-      app.appendChild(el);
-      const isFirst = first;
-      const evP = getJSON("/api/ev").catch(() => null);
-      wireEnergyCard(el, p.ps_id);
-      if (isFirst) {
-        getJSON(`/api/plants/${p.ps_id}/weather`).then(weather => {
-          if (weather?.current?.code != null) {
-            const { ico, label } = wmo(weather.current.code);
-            const t = weather.current.temp_c;
-            document.getElementById("wx-now").innerHTML =
-              `<span class="ico" title="${label}">${ico}</span>${t == null ? "" : t.toFixed(0) + " °C"}`;
-          }
-        }).catch(() => {});
+    await L.run();
+    L.ok = Date.now();
+    L.error = null;
+  } catch (e) {
+    L.error = e.message;
+    // Nothing shown yet: an inline error with a retry, never a blank page.
+    if (!L.ok && L.slot) {
+      const slot = document.querySelector(L.slot);
+      if (slot) {
+        slot.innerHTML = `<div class="error">${esc(e.message)}\n<button class="btn ghost" style="margin-top:0.6rem">Try again</button></div>`;
+        slot.querySelector("button").addEventListener("click", () => {
+          slot.innerHTML = '<div class="skel"></div>';
+          runLoader(L, true);
+        });
       }
-      const flowSlot = el.querySelector(".flow-slot");
-      Promise.all([getJSON(`/api/plants/${p.ps_id}/flow`), evP])
-        .then(([flow, ev]) => renderFlow(flowSlot, el.querySelector(".flow-sub"), flow, ev))
-        .catch(e => { flowSlot.innerHTML = `<div class="error">${e.message}</div>`; });
-      const panelsSlot = el.querySelector(".panels-slot");
-      const stringsP = getJSON(`/api/plants/${p.ps_id}/strings`).catch(() => null);
-      Promise.all([getJSON(`/api/plants/${p.ps_id}/panels`), stringsP])
-        .then(([panels, strMap]) =>
-          renderPanels(panelsSlot, el.querySelector(".panels-sub"), panels, strMap))
-        .catch(e => { panelsSlot.innerHTML = `<div class="error">${e.message}</div>`; });
-      loadSection(`/api/plants/${p.ps_id}/batteries`, renderBatteries,
-        el.querySelector(".batt-slot"), el.querySelector(".batt-sub"));
-      loadDevices(p.ps_id, el.querySelector(".devices-slot"));
-      first = false;
     }
-    // Sonoff smart plugs (hidden unless the eWeLink app is configured).
-    getJSON("/api/ewelink/devices")
-      .then(data => {
-        let slot = document.getElementById("sonoff-slot");
-        if (!slot) {
-          slot = document.createElement("div");
-          slot.id = "sonoff-slot";
-          app.appendChild(slot);
-        }
-        renderSonoff(slot, data);
-      })
-      .catch(() => {});
-    // Air conditioners (hidden unless the SmartThings app is configured).
-    getJSON("/api/aircon")
-      .then(data => {
-        let slot = document.getElementById("aircon-slot");
-        if (!slot) {
-          slot = document.createElement("div");
-          slot.id = "aircon-slot";
-          app.appendChild(slot);
-        }
-        renderAircon(slot, data);
-      })
-      .catch(() => {});
-    // Miele appliances (hidden unless the Miele app is configured).
-    getJSON("/api/miele/devices")
-      .then(data => {
-        let slot = document.getElementById("miele-slot");
-        if (!slot) {
-          slot = document.createElement("div");
-          slot.id = "miele-slot";
-          app.appendChild(slot);
-        }
-        renderAppliances(slot, data);
-      })
-      .catch(() => {});
-    document.getElementById("updated").textContent =
-      "updated " + new Date().toLocaleTimeString();
-  } catch (e) {
-    app.className = "";
-    app.innerHTML = `<div class="error">Failed to load plants:\n${e.message}</div>`;
+  } finally {
+    L.last = Date.now();
+    L.busy = false;
+    h?.classList.remove("updating");
+    setStale(card, L);
+    afterLoad();
   }
 }
 
-refresh();
-setInterval(refresh, 60_000);
+function afterLoad() {
+  renderAttention();
+  if (cur.sec === "system") renderLinks();
+  renderStatus();
+}
+
+const visibleNow = L => L.sec.includes("*") || L.sec.includes(cur.sec);
+
+function tick() {
+  if (document.hidden) { renderStatus(); return; }
+  for (const L of Object.values(loaders)) if (visibleNow(L)) runLoader(L);
+}
+
+// Force one loader soon (after an action, or a control change).
+function bump(name, delay = 0) {
+  setTimeout(() => { if (loaders[name]) runLoader(loaders[name], true); }, delay);
+}
+
+function renderStatus() {
+  const el = document.getElementById("updated");
+  const txt = el.querySelector(".txt");
+  const ok = Math.max(loaders.flow.ok, loaders.plants.ok);
+  el.classList.toggle("paused", document.hidden);
+  el.classList.toggle("late", !!ok && Date.now() - ok > 3 * MIN);
+  if (!ok) { txt.textContent = "connecting…"; return; }
+  const t = new Date(ok).toLocaleTimeString();
+  txt.textContent = document.hidden ? `paused · ${t}`
+    : Date.now() - ok > 3 * MIN ? `data delayed · ${t}` : `live · ${t}`;
+}
+
+function showSection(sec) {
+  if (!document.querySelector(`section[data-sec="${sec}"]`)) sec = "overview";
+  cur.sec = sec;
+  document.querySelectorAll("main > section").forEach(el => { el.hidden = el.dataset.sec !== sec; });
+  document.querySelectorAll(".tabs button").forEach(b => {
+    if (b.dataset.sec === sec) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
+  if (sec === "energy") energyControls.sync();
+  if (sec === "system") renderLinks();
+  tick();
+}
+
+document.querySelectorAll(".tabs button").forEach(b =>
+  b.addEventListener("click", () => { location.hash = b.dataset.sec; }));
+document.querySelectorAll("[data-goto]").forEach(b =>
+  b.addEventListener("click", () => { location.hash = b.dataset.goto; }));
+window.addEventListener("hashchange", () => showSection(location.hash.slice(1)));
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); else renderStatus(); });
+
+// An optional integration: 404 means "not configured" → hide for good.
+function integration(name, url, slotId, render) {
+  return async () => {
+    let data;
+    try {
+      data = await getJSON(url);
+    } catch (e) {
+      if (/^HTTP 404/.test(e.message)) {
+        home[name] = null;
+        loaders[name].disabled = true;
+        document.getElementById("card-home-empty").hidden =
+          !Object.values(home).every(v => v === null);
+        renderLinks();
+        return;
+      }
+      throw e;
+    }
+    home[name] = data;
+    const slot = document.getElementById(slotId);
+    if (!isInteracting(slot)) render(slot, data);
+    renderHomeSummary();
+    renderAutomations();
+  };
+}
+
+function plantLine(p) {
+  const online = p.ps_status === 1;
+  const parts = [esc(p.ps_name ?? "Plant " + p.ps_id), esc(p.ps_location ?? ""),
+    `<span class="status${online ? "" : " off"}"><span class="dot"></span>${online ? "Online" : "Offline"}</span>`];
+  let select = "";
+  if (cur.plants.length > 1) {
+    select = `<select class="plant-select" aria-label="Plant">${cur.plants.map(x =>
+      `<option value="${esc(x.ps_id)}" ${String(x.ps_id) === String(cur.psId) ? "selected" : ""}>${esc(x.ps_name ?? x.ps_id)}</option>`).join("")}</select> `;
+  }
+  return select + parts.filter(Boolean).join(" · ");
+}
+
+defLoader("plants", { label: "Plant data", sec: ["*"], every: 60 * S, async run() {
+  const data = await getJSON("/api/plants");
+  const plants = data.pageList || data.list || [];
+  if (!plants.length) throw new Error("No plants found on this account.");
+  cur.plants = plants;
+  const saved = (() => { try { return localStorage.getItem("psId"); } catch { return null; } })();
+  const p = plants.find(x => String(x.ps_id) === String(cur.psId ?? saved)) || plants[0];
+  const switched = String(p.ps_id) !== String(cur.psId);
+  cur.psId = p.ps_id; cur.plant = p;
+  const line = document.getElementById("plant-line");
+  if (!line.contains(document.activeElement)) {
+    line.innerHTML = plantLine(p);
+    line.querySelector("select")?.addEventListener("change", e => {
+      try { localStorage.setItem("psId", e.target.value); } catch {}
+      cur.psId = e.target.value;
+      for (const L of Object.values(loaders)) { L.last = 0; L.ok = 0; }
+      bump("plants");
+    });
+  }
+  document.getElementById("kpi-slot").innerHTML = kpiHTML(p);
+  if (switched) { for (const L of Object.values(loaders)) if (L.needsPlant) L.last = 0; setTimeout(tick, 0); }
+}});
+
+defLoader("weather", { label: "Weather", sec: ["*"], every: 30 * MIN, needsPlant: true, async run() {
+  const weather = await getJSON(`/api/plants/${cur.psId}/weather`);
+  if (weather?.current?.code != null) {
+    const { ico, label } = wmo(weather.current.code);
+    const t = weather.current.temp_c;
+    document.getElementById("wx-now").innerHTML =
+      `<span class="ico" title="${label}">${ico}</span>${t == null ? "" : t.toFixed(0) + " °C"}`;
+  }
+}});
+
+defLoader("flow", { label: "Energy flow", sec: ["overview"], every: 60 * S, needsPlant: true,
+  card: "card-flow", slot: "#card-flow .flow-slot", async run() {
+  const [flow, ev] = await Promise.all([
+    getJSON(`/api/plants/${cur.psId}/flow`),
+    getJSON("/api/ev").catch(() => null),
+  ]);
+  renderFlow(document.querySelector("#card-flow .flow-slot"), document.querySelector("#card-flow .flow-sub"), flow, ev);
+}});
+
+defLoader("energy", { label: "Energy chart", sec: ["energy"], every: 5 * MIN, needsPlant: true,
+  card: "card-energy", slot: "#card-energy .curve-slot", async run() {
+  const st = getEState(cur.psId);
+  const slot = document.querySelector("#card-energy .curve-slot");
+  // Past periods are final: once drawn, no need to poll them.
+  if (this.drawn === `${cur.psId}|${st.period}|${ymd(st.date)}` && !energyIsLive(st)) return;
+  await loadEnergy(slot, document.querySelector("#card-energy .curve-max"), cur.psId, st);
+  this.drawn = `${cur.psId}|${st.period}|${ymd(st.date)}`;
+}});
+
+// Strings mapping is recomputed daily server-side: fetch it rarely.
+const stringsCache = { at: 0, data: null };
+defLoader("panels", { label: "Panels", sec: ["solar", "overview"], every: 5 * MIN, needsPlant: true,
+  card: "card-panels", slot: "#card-panels .panels-slot", async run() {
+  const stringsP = Date.now() - stringsCache.at > 30 * MIN
+    ? getJSON(`/api/plants/${cur.psId}/strings`).catch(() => null)
+        .then(d => { stringsCache.at = Date.now(); stringsCache.data = d; return d; })
+    : Promise.resolve(stringsCache.data);
+  const [panels, strMap] = await Promise.all([getJSON(`/api/plants/${cur.psId}/panels`), stringsP]);
+  lastPanels.data = panels;
+  renderPanels(document.querySelector("#card-panels .panels-slot"), document.querySelector("#card-panels .panels-sub"), panels, strMap);
+}});
+
+defLoader("batt", { label: "Battery data", sec: ["storage"], every: 5 * MIN, needsPlant: true,
+  card: "card-batt", slot: "#card-batt .batt-slot", async run() {
+  const data = await getJSON(`/api/plants/${cur.psId}/batteries`);
+  renderBatteries(document.querySelector("#card-batt .batt-slot"), document.querySelector("#card-batt .batt-sub"), data);
+}});
+
+defLoader("ev", { label: "EV charger", sec: ["storage"], every: 60 * S, card: "card-ev", async run() {
+  let ev;
+  try { ev = await getJSON("/api/ev"); }
+  catch (e) {
+    if (/^HTTP 404/.test(e.message)) { this.disabled = true; return; }
+    throw e;
+  }
+  const card = document.getElementById("card-ev");
+  card.hidden = false;
+  renderEV(card.querySelector(".ev-slot"), ev);
+}});
+
+defLoader("devices", { label: "Device list", sec: ["system"], every: 30 * MIN, needsPlant: true,
+  card: "card-devices", slot: "#card-devices .devices-slot", async run() {
+  const data = await getJSON(`/api/plants/${cur.psId}/devices`);
+  renderDevices(document.querySelector("#card-devices .devices-slot"), document.querySelector("#card-devices .devices-sub"), data, cur.plant);
+}});
+
+defLoader("aircon", { label: "Air conditioning", sec: ["home", "overview"], every: 30 * S,
+  card: "aircon-slot", run: integration("aircon", "/api/aircon", "aircon-slot", renderAircon) });
+defLoader("sonoff", { label: "Smart plugs", sec: ["home", "overview"], every: 30 * S,
+  card: "sonoff-slot", run: integration("sonoff", "/api/ewelink/devices", "sonoff-slot", renderSonoff) });
+defLoader("miele", { label: "Appliances", sec: ["home", "overview"], every: 30 * S,
+  card: "miele-slot", run: integration("miele", "/api/miele/devices", "miele-slot", renderAppliances) });
+
+wireEnergyCard(document.getElementById("card-energy"));
+showSection(location.hash.slice(1) || "overview");
+setInterval(tick, 5 * S);
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
 </script>
