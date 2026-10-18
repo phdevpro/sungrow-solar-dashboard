@@ -171,6 +171,16 @@ def _metric(params: dict[str, Any], key: str, uiid: int | None) -> float | None:
     return v
 
 
+def _sensor(params: dict[str, Any], *keys: str) -> float | None:
+    # TH/THR models (uiid 15, 181, …) report "currentTemperature" and
+    # "currentHumidity" as strings, "unavailable" when no probe is fitted.
+    for key in keys:
+        v = _num(params.get(key))
+        if v is not None:
+            return v
+    return None
+
+
 async def get_devices() -> list[dict[str, Any]]:
     data = await _request("GET", "/v2/device/thing", params={"num": 0})
     out = []
@@ -197,6 +207,8 @@ async def get_devices() -> list[dict[str, Any]]:
             "power_w": _metric(params, "power", uiid),
             "voltage": _metric(params, "voltage", uiid),
             "current": _metric(params, "current", uiid),
+            "temp_c": _sensor(params, "currentTemperature", "temperature"),
+            "humidity": _sensor(params, "currentHumidity", "humidity"),
         })
     return out
 

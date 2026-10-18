@@ -94,6 +94,14 @@ CREATE TABLE IF NOT EXISTS plant_kpi (
 """
 
 
+# Columns added after a table was first created (CREATE TABLE IF NOT
+# EXISTS leaves existing tables alone).
+MIGRATIONS = [
+    ("sonoff_samples", "temp_c", "REAL"),
+    ("sonoff_samples", "humidity", "REAL"),
+]
+
+
 def connect() -> sqlite3.Connection:
     global _conn
     if _conn is None:
@@ -101,6 +109,11 @@ def connect() -> sqlite3.Connection:
         _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.executescript(SCHEMA)
+        for table, column, kind in MIGRATIONS:
+            cols = {r[1] for r in _conn.execute(f"PRAGMA table_info({table})")}
+            if column not in cols:
+                _conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+        _conn.commit()
     return _conn
 
 
@@ -162,20 +175,22 @@ def store_kpi(ps_id: str, ts: str, curr_power_w, today_kwh, total_kwh) -> None:
 
 def store_sonoff(ts: str, rows: list[dict[str, Any]]) -> None:
     _execmany(
-        "INSERT OR REPLACE INTO sonoff_samples (device_id, ts, power_w, switch) "
-        "VALUES (?, ?, ?, ?)",
-        [(r["id"], ts, r.get("power_w"), r.get("switch")) for r in rows if r.get("id")],
+        "INSERT OR REPLACE INTO sonoff_samples (device_id, ts, power_w, switch, temp_c, humidity) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [(r["id"], ts, r.get("power_w"), r.get("switch"), r.get("temp_c"), r.get("humidity"))
+         for r in rows if r.get("id")],
     )
 
 
 def load_sonoff_day(device_id: str, date: str) -> list[dict[str, Any]]:
     with _lock:
         cur = connect().execute(
-            "SELECT ts, power_w, switch FROM sonoff_samples "
+            "SELECT ts, power_w, switch, temp_c, humidity FROM sonoff_samples "
             "WHERE device_id = ? AND ts LIKE ? ORDER BY ts",
             (device_id, f"{date}%"),
         )
-        return [{"t": ts[8:12], "power_w": p, "switch": s} for ts, p, s in cur.fetchall()]
+        return [{"t": ts[8:12], "power_w": p, "switch": s, "temp_c": t, "humidity": h}
+                for ts, p, s, t, h in cur.fetchall()]
 
 
 def store_aircon(ts: str, rows: list[dict[str, Any]]) -> None:

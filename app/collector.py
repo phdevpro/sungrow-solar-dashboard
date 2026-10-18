@@ -346,13 +346,14 @@ async def collect_once() -> None:
     for plant in plants:
         await _collect_plant(plant)
 
-    # Sonoff power-metering snapshot (POW models).
+    # Sonoff snapshot: power meters (POW) and temperature probes (TH/THR).
     if ewelink.enabled() and ewelink.connected():
         try:
             devices = await ewelink.get_devices()
             storage.store_sonoff(
                 time.strftime("%Y%m%d%H%M%S"),
-                [d for d in devices if d.get("power_w") is not None],
+                [d for d in devices
+                 if d.get("power_w") is not None or d.get("temp_c") is not None],
             )
         except Exception as exc:
             log.warning("sonoff snapshot failed: %s", exc)

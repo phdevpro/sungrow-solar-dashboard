@@ -1101,6 +1101,8 @@ function renderSonoff(el, data) {
               <div class="name">${esc(d.name)}${d.model ? ` · ${esc(d.model)}` : ""}</div>
               <div class="meta">
                 <span class="status${d.online ? "" : " off"}"><span class="dot"></span>${d.online ? "Online" : "Offline"}</span>
+                ${d.temp_c != null ? ` · ${d.temp_c.toFixed(1)} °C` : ""}
+                ${d.humidity != null ? ` · ${d.humidity.toFixed(0)}% RH` : ""}
                 ${d.power_w != null ? ` · ${d.power_w.toFixed(1)} W` : ""}
                 ${d.voltage != null ? ` · ${d.voltage.toFixed(0)} V` : ""}
               </div>
