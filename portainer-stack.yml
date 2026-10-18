@@ -29,6 +29,10 @@ services:
       EWELINK_CLIENT_ID: ${EWELINK_CLIENT_ID}
       EWELINK_CLIENT_SECRET: ${EWELINK_CLIENT_SECRET}
       EWELINK_REGION: eu
+      # Samsung SmartThings ACs (OAuth-In app via SmartThings CLI); leave empty to disable.
+      # Register redirect URI: https://<DASH_DOMAIN>/api/smartthings/callback
+      SMARTTHINGS_CLIENT_ID: ${SMARTTHINGS_CLIENT_ID}
+      SMARTTHINGS_CLIENT_SECRET: ${SMARTTHINGS_CLIENT_SECRET}
     volumes:
       - solar_data:/data
     networks:

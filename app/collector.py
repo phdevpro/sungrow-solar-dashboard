@@ -2,11 +2,12 @@
 persists samples to SQLite, so historical queries never hit the API."""
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime
 
-from . import ewelink, miele, storage, wallconnector
+from . import ewelink, miele, smartthings, storage, wallconnector
 from .config import settings
 from .isolarcloud import ISolarCloudError, client
 
@@ -25,6 +26,46 @@ def load_miele_auto() -> None:
 def set_miele_auto(enabled: bool) -> None:
     miele_auto["enabled"] = enabled
     storage.set_setting("miele_auto", "1" if enabled else "0")
+
+
+# Solar-surplus air conditioning. Opt-in per unit; only units the
+# automation switched on are ever switched off by it, so manual use is
+# never overridden. State lives in settings/kv to survive restarts.
+ac_auto = {"enabled": False, "devices": set(), "last_action_ts": 0.0, "deficit_cycles": 0}
+AC_COOLDOWN = 600       # min seconds between AC actions (compressor protection)
+AC_STOP_CYCLES = 2      # consecutive deficit cycles before switching off
+AC_STARTED_KEY = "ac_auto_started"
+
+
+def load_ac_auto() -> None:
+    ac_auto["enabled"] = storage.get_setting("ac_auto") == "1"
+    ac_auto["devices"] = set(json.loads(storage.get_setting("ac_auto_devices") or "[]"))
+
+
+def set_ac_auto(enabled: bool | None = None, device_id: str | None = None,
+                device_on: bool | None = None) -> None:
+    # Turning automation off (globally or for a unit) hands those units
+    # back to manual control as they are: nothing is switched off.
+    if enabled is not None:
+        ac_auto["enabled"] = enabled
+        storage.set_setting("ac_auto", "1" if enabled else "0")
+        if not enabled:
+            _save_ac_started(set())
+    if device_id is not None:
+        if device_on:
+            ac_auto["devices"].add(device_id)
+        else:
+            ac_auto["devices"].discard(device_id)
+            _save_ac_started(ac_auto_started() - {device_id})
+        storage.set_setting("ac_auto_devices", json.dumps(sorted(ac_auto["devices"])))
+
+
+def ac_auto_started() -> set[str]:
+    return set(json.loads(storage.kv_get(AC_STARTED_KEY) or "[]"))
+
+
+def _save_ac_started(ids: set[str]) -> None:
+    storage.kv_put(AC_STARTED_KEY, json.dumps(sorted(ids)))
 
 log = logging.getLogger("collector")
 
@@ -143,6 +184,7 @@ async def _collect_plant(plant: dict) -> None:
             if flow:
                 storage.store_flow(ps_id, flow.get("time") or now, flow)
                 await _miele_auto_start(flow)
+                await _ac_auto(flow)
         except ISolarCloudError as exc:
             log.warning("flow snapshot failed for %s: %s", ps_id, exc)
 
@@ -207,6 +249,58 @@ async def _miele_auto_start(flow: dict) -> None:
         log.warning("miele auto-start failed: %s", exc)
 
 
+async def _ac_auto(flow: dict) -> None:
+    """Switch on one opted-in AC on solar surplus; switch off the units
+    it started when the house runs on battery/grid for a sustained time."""
+    if not (smartthings.enabled() and smartthings.connected()):
+        return
+    if not (ac_auto["enabled"] and ac_auto["devices"]):
+        return
+    started = ac_auto_started()
+    export = flow.get("grid_export_w") or 0
+    deficit = (flow.get("grid_import_w") or 0) + (flow.get("batt_discharge_w") or 0)
+    soc = flow.get("soc")
+    ac_auto["deficit_cycles"] = ac_auto["deficit_cycles"] + 1 if deficit > settings.ac_auto_stop_w else 0
+    try:
+        devices = {d["id"]: d for d in await smartthings.get_devices()}
+        # Forget units that are off now (switched off by hand or by us),
+        # or that the user took out of automation.
+        still = {i for i in started if devices.get(i, {}).get("switch") == "on"}
+        if still != started:
+            started = still
+            _save_ac_started(started)
+        if time.time() - ac_auto["last_action_ts"] < AC_COOLDOWN:
+            return
+
+        low_soc = soc is not None and soc < settings.ac_auto_min_soc
+        if started and (ac_auto["deficit_cycles"] >= AC_STOP_CYCLES or low_soc):
+            dev_id = sorted(started)[0]
+            await smartthings.set_switch(dev_id, False)
+            started.discard(dev_id)
+            _save_ac_started(started)
+            ac_auto["last_action_ts"] = time.time()
+            log.info("ac auto-stop: %s (deficit %.0f W, soc %s)",
+                     devices[dev_id]["name"], deficit, soc)
+            return
+
+        if export < settings.ac_auto_surplus_w or soc is None or low_soc:
+            return
+        candidate = next((d for i, d in devices.items()
+                          if i in ac_auto["devices"] and d["online"] and d["switch"] == "off"),
+                         None)
+        if candidate is None:
+            return
+        await smartthings.set_switch(candidate["id"], True)
+        started.add(candidate["id"])
+        _save_ac_started(started)
+        ac_auto["last_action_ts"] = time.time()
+        ac_auto["deficit_cycles"] = 0
+        log.info("ac auto-start: %s (%s) at export %.0f W",
+                 candidate["name"], candidate["mode"], export)
+    except Exception as exc:
+        log.warning("ac auto failed: %s", exc)
+
+
 async def collect_once() -> None:
     plants = (await client.get_power_station_list()).get("pageList", [])
     for plant in plants:
@@ -222,6 +316,14 @@ async def collect_once() -> None:
             )
         except Exception as exc:
             log.warning("sonoff snapshot failed: %s", exc)
+
+    # SmartThings air conditioners.
+    if smartthings.enabled() and smartthings.connected():
+        try:
+            storage.store_aircon(time.strftime("%Y%m%d%H%M%S"),
+                                 await smartthings.get_devices())
+        except Exception as exc:
+            log.warning("aircon snapshot failed: %s", exc)
 
     # Wall Connector on the same LAN (remote deployments use the push
     # agent + /api/ev/ingest instead).

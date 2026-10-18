@@ -72,6 +72,17 @@ CREATE TABLE IF NOT EXISTS sonoff_samples (
     switch    TEXT,
     PRIMARY KEY (device_id, ts)
 );
+CREATE TABLE IF NOT EXISTS aircon_samples (
+    device_id  TEXT NOT NULL,
+    ts         TEXT NOT NULL,     -- yyyyMMddHHmmss
+    power_w    REAL,
+    energy_wh  REAL,              -- cumulative meter reading
+    switch     TEXT,
+    mode       TEXT,
+    temp_c     REAL,
+    setpoint_c REAL,
+    PRIMARY KEY (device_id, ts)
+);
 CREATE TABLE IF NOT EXISTS plant_kpi (
     ps_id        TEXT NOT NULL,
     ts           TEXT NOT NULL,
@@ -165,6 +176,31 @@ def load_sonoff_day(device_id: str, date: str) -> list[dict[str, Any]]:
             (device_id, f"{date}%"),
         )
         return [{"t": ts[8:12], "power_w": p, "switch": s} for ts, p, s in cur.fetchall()]
+
+
+def store_aircon(ts: str, rows: list[dict[str, Any]]) -> None:
+    _execmany(
+        "INSERT OR REPLACE INTO aircon_samples "
+        "(device_id, ts, power_w, energy_wh, switch, mode, temp_c, setpoint_c) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [(r["id"], ts, r.get("power_w"), r.get("energy_wh"), r.get("switch"),
+          r.get("mode"), r.get("temp_c"), r.get("setpoint_c"))
+         for r in rows if r.get("id")],
+    )
+
+
+def load_aircon_day(device_id: str, date: str) -> list[dict[str, Any]]:
+    with _lock:
+        cur = connect().execute(
+            "SELECT ts, power_w, energy_wh, switch, mode, temp_c, setpoint_c "
+            "FROM aircon_samples WHERE device_id = ? AND ts LIKE ? ORDER BY ts",
+            (device_id, f"{date}%"),
+        )
+        return [
+            {"t": ts[8:12], "power_w": p, "energy_wh": e, "switch": sw,
+             "mode": m, "temp_c": t, "setpoint_c": sp}
+            for ts, p, e, sw, m, t, sp in cur.fetchall()
+        ]
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

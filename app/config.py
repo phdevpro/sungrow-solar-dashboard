@@ -44,6 +44,19 @@ class Settings:
     ewelink_client_secret: str = os.getenv("EWELINK_CLIENT_SECRET", "")
     ewelink_region: str = os.getenv("EWELINK_REGION", "eu")  # eu | us | as | cn
 
+    # Samsung SmartThings air conditioners (OAuth-In app from the
+    # SmartThings CLI). Redirect URI to register:
+    # https://<your-dashboard>/api/smartthings/callback
+    smartthings_client_id: str = os.getenv("SMARTTHINGS_CLIENT_ID", "")
+    smartthings_client_secret: str = os.getenv("SMARTTHINGS_CLIENT_SECRET", "")
+    # Solar-surplus AC: switch on one opted-in unit when grid export
+    # exceeds AC_AUTO_SURPLUS_W and the battery is at least AC_AUTO_MIN_SOC;
+    # switch off units it started once the house draws more than
+    # AC_AUTO_STOP_W from battery + grid for two cycles in a row.
+    ac_auto_surplus_w: float = float(os.getenv("AC_AUTO_SURPLUS_W", "1500"))
+    ac_auto_min_soc: float = float(os.getenv("AC_AUTO_MIN_SOC", "0.5"))
+    ac_auto_stop_w: float = float(os.getenv("AC_AUTO_STOP_W", "500"))
+
     # Dashboard login (optional): auth is enabled when both are set.
     dash_user: str = os.getenv("DASH_USER", "")
     dash_password: str = os.getenv("DASH_PASSWORD", "")

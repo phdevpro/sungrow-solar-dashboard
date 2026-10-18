@@ -197,6 +197,13 @@
   }
   .btn.ghost { background: transparent; color: var(--ink-2); border: 1px solid var(--border); }
   .btn:disabled { opacity: 0.4; cursor: default; }
+  .ac-ctrl { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+  .ac-ctrl select {
+    padding: 0.4rem 0.5rem; border: 1px solid var(--border); border-radius: 8px;
+    font: inherit; font-size: 0.85rem; background: var(--surface); color: var(--ink);
+  }
+  .ac-ctrl .sp { min-width: 3.6rem; text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ac-ctrl .btn.step { padding: 0.45rem 0.7rem; }
   .auto-toggle { color: var(--ink-2); font-size: 0.85rem; display: inline-flex; align-items: center; gap: 0.4rem; }
   .batt-system {
     display: flex; align-items: center; gap: 1.2rem; flex-wrap: wrap;
@@ -1005,6 +1012,101 @@ function renderSonoff(el, data) {
   }));
 }
 
+/* ---------------- SmartThings air conditioners ---------------- */
+
+const AC_MODES = { cool: "Cool", heat: "Heat", dry: "Dry", wind: "Fan", auto: "Auto", fan: "Fan", aIComfort: "AI comfort" };
+
+function renderAircon(el, data) {
+  if (!data.connected) {
+    el.innerHTML = `
+      <div class="card">
+        <h3>Air conditioning</h3>
+        <div class="card-body">
+          <a class="btn" href="/api/smartthings/login">Connect SmartThings account</a>
+        </div>
+      </div>`;
+    return;
+  }
+  const devices = data.devices || [];
+  const totalW = devices.reduce((a, d) => a + (d.switch === "on" ? d.power_w ?? 0 : 0), 0);
+  el.innerHTML = `
+    <div class="card">
+      <h3>Air conditioning
+        <span class="sub">
+          ${totalW ? `${totalW.toFixed(0)} W now · ` : ""}
+          <label class="auto-toggle">
+            <input type="checkbox" class="ac-auto" ${data.auto ? "checked" : ""}>
+            Run on solar surplus (&gt; ${(data.surplus_w / 1000).toFixed(1)} kW export, battery ≥ ${Math.round((data.min_soc ?? 0) * 100)}%)
+          </label>
+        </span>
+      </h3>
+      <div class="card-body">
+        ${devices.length ? devices.map(d => {
+          const on = d.switch === "on";
+          const dis = d.online ? "" : "disabled";
+          const meta = [
+            `<span class="status${d.online ? "" : " off"}"><span class="dot"></span>${d.online ? (on ? "On" : "Off") : "Offline"}</span>`,
+            d.temp_c != null ? `room ${d.temp_c.toFixed(1)} °C` : "",
+            d.humidity != null ? `${d.humidity.toFixed(0)}% RH` : "",
+            on && d.power_w != null ? `${d.power_w.toFixed(0)} W` : "",
+            d.auto_started ? "started by solar surplus" : "",
+          ].filter(Boolean).join(" · ");
+          return `
+          <div class="appl-row" data-id="${esc(d.id)}">
+            <div class="appl-info">
+              <div class="name">${esc(d.name)}</div>
+              <div class="meta">${meta}</div>
+              <label class="auto-toggle"><input type="checkbox" class="ac-dev-auto" ${d.auto ? "checked" : ""}> Use for solar surplus</label>
+            </div>
+            <div class="ac-ctrl">
+              <select class="ac-mode" ${dis} aria-label="Mode">
+                ${(d.modes.length ? d.modes : [d.mode]).filter(Boolean).map(m =>
+                  `<option value="${esc(m)}" ${m === d.mode ? "selected" : ""}>${esc(AC_MODES[m] || m)}</option>`).join("")}
+              </select>
+              <button class="btn ghost step" data-step="-0.5" ${dis} aria-label="Lower setpoint">−</button>
+              <span class="sp">${d.setpoint_c != null ? d.setpoint_c.toFixed(1) + "°" : "—"}</span>
+              <button class="btn ghost step" data-step="0.5" ${dis} aria-label="Raise setpoint">+</button>
+              <button class="btn${on ? "" : " ghost"} ac-power" ${dis}>${on ? "⏻ Turn off" : "⏻ Turn on"}</button>
+            </div>
+          </div>`;
+        }).join("")
+        : '<div class="muted">No air conditioners found on this SmartThings account.</div>'}
+      </div>
+    </div>`;
+
+  const send = async (row, body, ctl) => {
+    ctl.disabled = true;
+    try {
+      await postJSON(`/api/aircon/${encodeURIComponent(row.dataset.id)}`, body);
+      setTimeout(refresh, 2500);
+    } catch (e) {
+      ctl.disabled = false;
+      ctl.title = e.message;
+      alert(`Air conditioner: ${e.message}`);
+    }
+  };
+  el.querySelectorAll(".appl-row[data-id]").forEach(row => {
+    const d = devices.find(x => x.id === row.dataset.id);
+    row.querySelector(".ac-power").addEventListener("click", e =>
+      send(row, { on: d.switch !== "on" }, e.currentTarget));
+    row.querySelector(".ac-mode").addEventListener("change", e =>
+      send(row, { mode: e.currentTarget.value }, e.currentTarget));
+    row.querySelectorAll(".step").forEach(b => b.addEventListener("click", () => {
+      if (d.setpoint_c == null) return;
+      d.setpoint_c = Math.min(30, Math.max(16, d.setpoint_c + Number(b.dataset.step)));
+      row.querySelector(".sp").textContent = d.setpoint_c.toFixed(1) + "°";
+      // Debounce: send once the user stops tapping.
+      clearTimeout(row._spTimer);
+      row._spTimer = setTimeout(() => send(row, { setpoint: d.setpoint_c }, b), 800);
+    }));
+    row.querySelector(".ac-dev-auto").addEventListener("change", e =>
+      postJSON("/api/aircon-auto", { device_id: d.id, device_on: e.currentTarget.checked }).catch(() => {}));
+  });
+  const toggle = el.querySelector(".ac-auto");
+  toggle.addEventListener("change", () =>
+    postJSON("/api/aircon-auto", { enabled: toggle.checked }).catch(() => {}));
+}
+
 /* ---------------- Devices ---------------- */
 
 async function loadDevices(psId, container) {
@@ -1094,6 +1196,18 @@ async function refresh() {
           app.appendChild(slot);
         }
         renderSonoff(slot, data);
+      })
+      .catch(() => {});
+    // Air conditioners (hidden unless the SmartThings app is configured).
+    getJSON("/api/aircon")
+      .then(data => {
+        let slot = document.getElementById("aircon-slot");
+        if (!slot) {
+          slot = document.createElement("div");
+          slot.id = "aircon-slot";
+          app.appendChild(slot);
+        }
+        renderAircon(slot, data);
       })
       .catch(() => {});
     // Miele appliances (hidden unless the Miele app is configured).

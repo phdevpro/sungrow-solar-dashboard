@@ -10,7 +10,7 @@ import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 
-from . import auth, collector, ewelink, miele, storage, strings, wallconnector
+from . import auth, collector, ewelink, miele, smartthings, storage, strings, wallconnector
 from .collector import POWER_POINT, fetch_flow
 from .config import settings
 from .isolarcloud import ISolarCloudError, client, make_transport
@@ -69,6 +69,7 @@ async def lifespan(app: FastAPI):
     )
     storage.connect()
     collector.load_miele_auto()
+    collector.load_ac_auto()
     task = asyncio.create_task(collector.run_forever())
     yield
     task.cancel()
@@ -557,6 +558,115 @@ async def ewelink_history(device_id: str, date: str | None = None):
     date = date or datetime.now().strftime("%Y%m%d")
     return {"device_id": device_id, "date": date,
             "samples": storage.load_sonoff_day(device_id, date)}
+
+
+# ---- SmartThings air conditioners -----------------------------------------
+
+
+def _smartthings_redirect_uri(request: Request) -> str:
+    scheme = "https" if _is_https(request) else "http"
+    return f"{scheme}://{request.url.netloc}/api/smartthings/callback"
+
+
+def _require_smartthings() -> None:
+    if not (smartthings.enabled() and smartthings.connected()):
+        raise HTTPException(status_code=404, detail="SmartThings not connected")
+
+
+@app.get("/api/smartthings/login")
+async def smartthings_login(request: Request):
+    if not smartthings.enabled():
+        raise HTTPException(status_code=404, detail="SmartThings app not configured")
+    import secrets
+    state = secrets.token_urlsafe(16)
+    storage.kv_put("smartthings_oauth_state", state)
+    return RedirectResponse(smartthings.auth_url(_smartthings_redirect_uri(request), state))
+
+
+@app.get("/api/smartthings/callback")
+async def smartthings_callback(request: Request, code: str = "", state: str = ""):
+    if not smartthings.enabled():
+        raise HTTPException(status_code=404, detail="SmartThings app not configured")
+    import hmac as _hmac
+    expected = storage.kv_get("smartthings_oauth_state") or ""
+    if not code or not expected or not _hmac.compare_digest(state, expected):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    try:
+        await smartthings.exchange_code(code, _smartthings_redirect_uri(request))
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=502, detail=f"SmartThings token exchange failed: {exc}")
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/api/aircon")
+async def aircon_devices():
+    if not smartthings.enabled():
+        raise HTTPException(status_code=404, detail="SmartThings app not configured")
+    if not smartthings.connected():
+        return {"connected": False, "devices": []}
+    cached = cache_get("aircon", 15)
+    if cached is not None:
+        return cached
+    try:
+        devices = await smartthings.get_devices()
+    except Exception as exc:
+        if not smartthings.connected():  # tokens rejected: offer to reconnect
+            return {"connected": False, "devices": []}
+        raise HTTPException(status_code=502, detail=f"SmartThings API: {exc}")
+    started = collector.ac_auto_started()
+    for d in devices:
+        d["auto"] = d["id"] in collector.ac_auto["devices"]
+        d["auto_started"] = d["id"] in started
+    return cache_put("aircon", {
+        "connected": True, "devices": devices,
+        "auto": collector.ac_auto["enabled"],
+        "surplus_w": settings.ac_auto_surplus_w,
+        "min_soc": settings.ac_auto_min_soc,
+        "stop_w": settings.ac_auto_stop_w,
+    })
+
+
+@app.post("/api/aircon/{device_id}")
+async def aircon_command(device_id: str, request: Request):
+    """Body: any of {"on": bool, "mode": str, "setpoint": float}."""
+    _require_smartthings()
+    body = await request.json()
+    try:
+        if "mode" in body:
+            await smartthings.set_mode(device_id, str(body["mode"]))
+        if "setpoint" in body:
+            sp = float(body["setpoint"])
+            if not 16 <= sp <= 30:
+                raise HTTPException(status_code=400, detail="Setpoint must be 16-30 °C")
+            await smartthings.set_setpoint(device_id, sp)
+        if "on" in body:
+            await smartthings.set_switch(device_id, bool(body["on"]))
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"SmartThings API: {exc}")
+    _response_cache.pop("aircon", None)
+    return {"ok": True}
+
+
+@app.post("/api/aircon-auto")
+async def aircon_auto(request: Request):
+    """Body: {"enabled": bool} and/or {"device_id": str, "device_on": bool}."""
+    body = await request.json()
+    collector.set_ac_auto(
+        enabled=bool(body["enabled"]) if "enabled" in body else None,
+        device_id=body.get("device_id"),
+        device_on=bool(body.get("device_on")),
+    )
+    log.info("ac solar-surplus auto: %s devices=%s",
+             collector.ac_auto["enabled"], sorted(collector.ac_auto["devices"]))
+    _response_cache.pop("aircon", None)
+    return {"auto": collector.ac_auto["enabled"]}
+
+
+@app.get("/api/aircon/{device_id}/history")
+async def aircon_history(device_id: str, date: str | None = None):
+    date = date or datetime.now().strftime("%Y%m%d")
+    return {"device_id": device_id, "date": date,
+            "samples": storage.load_aircon_day(device_id, date)}
 
 
 # ---- Miele appliances ------------------------------------------------------
